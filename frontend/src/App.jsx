@@ -27,42 +27,35 @@ export const useAuth = () => useContext(AuthContext)
 // Configure Axios
 axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+// Register global Axios interceptors once on load
+axios.interceptors.request.use(
+  (config) => {
+    const activeToken = localStorage.getItem('token')
+    if (activeToken) {
+      config.headers.Authorization = `Bearer ${activeToken}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      const isLoginRequest = error.config && error.config.url && error.config.url.includes('/api/auth/login')
+      if (!isLoginRequest) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 function AppContent() {
   const { token, logout } = useAuth()
   const navigate = useNavigate()
-
-  // Setup Axios interceptors
-  useEffect(() => {
-    const requestInterceptor = axios.interceptors.request.use(
-      (config) => {
-        const activeToken = localStorage.getItem('token')
-        if (activeToken) {
-          config.headers.Authorization = `Bearer ${activeToken}`
-        }
-        return config
-      },
-      (error) => Promise.reject(error)
-    )
-
-    const responseInterceptor = axios.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response && error.response.status === 401) {
-          const isLoginRequest = error.config && error.config.url && error.config.url.includes('/api/auth/login')
-          if (!isLoginRequest) {
-            logout()
-            navigate('/login')
-          }
-        }
-        return Promise.reject(error)
-      }
-    )
-
-    return () => {
-      axios.interceptors.request.eject(requestInterceptor)
-      axios.interceptors.response.eject(responseInterceptor)
-    }
-  }, [logout, navigate])
 
   return (
     <Routes>
