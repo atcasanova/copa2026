@@ -10,6 +10,20 @@ from ..auth import get_current_active_user
 
 router = APIRouter(prefix="/api/announcements", tags=["Announcements"])
 
+def user_can_access_announcement(db: Session, announcement: Announcement, current_user: User) -> bool:
+    if announcement.target_type == "global":
+        return True
+
+    if announcement.target_type == "group" and announcement.target_group_id:
+        membership = db.query(GroupMember).filter(
+            GroupMember.group_id == announcement.target_group_id,
+            GroupMember.user_id == current_user.id,
+            GroupMember.is_approved == True
+        ).first()
+        return membership is not None or current_user.role == "system_admin"
+
+    return False
+
 def list_announcements(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -77,6 +91,9 @@ def mark_as_read(
 ):
     announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
     if not announcement:
+        raise HTTPException(status_code=404, detail="Comunicado não encontrado.")
+
+    if not user_can_access_announcement(db, announcement, current_user):
         raise HTTPException(status_code=404, detail="Comunicado não encontrado.")
         
     # Check if already marked as read

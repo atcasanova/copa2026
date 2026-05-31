@@ -2,6 +2,7 @@ import pytest
 from app.models import User, PixConfig, Match, Team, Stadium
 from app.auth import get_password_hash
 import io
+from PIL import Image
 
 def get_auth_headers(client, username, password="password"):
     login_data = {"username": username, "password": password}
@@ -84,7 +85,9 @@ def test_proof_upload_validation(client, db_session, test_users):
     assert "excede o limite de 1MB" in res.json()["detail"]
     
     # Test 4: Valid JPEG upload
-    valid_jpeg = b"\xff\xd8\xff" + b"image bytes data here"
+    jpeg_buffer = io.BytesIO()
+    Image.new("RGB", (1, 1), color="white").save(jpeg_buffer, format="JPEG")
+    valid_jpeg = jpeg_buffer.getvalue()
     files = {"file": ("proof.jpg", valid_jpeg, "image/jpeg")}
     res = client.post("/api/payments/submit-proof", data=data, files=files, headers=p1_headers)
     assert res.status_code == 200

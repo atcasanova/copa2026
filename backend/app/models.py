@@ -286,10 +286,22 @@ class SystemInvitation(Base):
     used_by = relationship("User", foreign_keys=[used_by_id])
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User")
+
+
 class SystemSetting(Base):
     __tablename__ = "system_settings"
 
     key = Column(String, primary_key=True)
     value = Column(String, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-

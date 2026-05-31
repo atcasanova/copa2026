@@ -50,6 +50,13 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(..., min_length=20)
+    password: str = Field(..., min_length=6)
+
 # Team Schemas
 class TeamResponse(BaseModel):
     name: str
@@ -153,12 +160,14 @@ class GroupResponse(BaseModel):
     name: str
     description: Optional[str] = None
     owner_id: UUID
-    invite_code: str
     is_private: bool
     created_at: datetime
     owner: Optional[UserPublicResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class GroupDetailResponse(GroupResponse):
+    invite_code: Optional[str] = None
 
 # Group Invitation Schemas
 class GroupInvitationCreate(BaseModel):
@@ -219,8 +228,8 @@ class MultiplierHistoryResponse(BaseModel):
 class AnnouncementCreate(BaseModel):
     title: str = Field(..., min_length=3, max_length=100)
     body: str = Field(..., min_length=10)
-    priority: str = "low"  # low, medium, high
-    target_type: str = "global"  # global, group
+    priority: str = Field("low", pattern="^(low|medium|high)$")
+    target_type: str = Field("global", pattern="^(global|group)$")
     target_group_id: Optional[UUID] = None
     expiration_date: Optional[datetime] = None
 
@@ -317,4 +326,3 @@ class SystemInvitationResponse(BaseModel):
     used_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
-

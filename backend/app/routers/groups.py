@@ -6,7 +6,7 @@ from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from ..db import get_db
 from ..models import Group, GroupMember, GroupInvitation, User, AuditLog, Match, Prediction
-from ..schemas import GroupCreate, GroupResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate
+from ..schemas import GroupCreate, GroupResponse, GroupDetailResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate
 from ..auth import get_current_active_user
 import io
 import csv
@@ -42,6 +42,19 @@ def check_group_admin(db: Session, group_id: UUID, user_id: UUID) -> bool:
         GroupMember.role.in_(["owner", "admin"])
     ).first()
     return membership is not None
+
+def serialize_group_detail(group: Group, include_invite_code: bool) -> dict:
+    data = {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "owner_id": group.owner_id,
+        "is_private": group.is_private,
+        "created_at": group.created_at,
+        "owner": group.owner,
+        "invite_code": group.invite_code if include_invite_code else None,
+    }
+    return data
 
 def create_group_record(
     group_in: GroupCreate,
@@ -95,7 +108,10 @@ def list_my_and_public_groups(
     Get groups that are either public or where the current user is a member.
     """
     # Subquery groups current user belongs to
-    my_group_ids = [m.group_id for m in db.query(GroupMember.group_id).filter(GroupMember.user_id == current_user.id).all()]
+    my_group_ids = [m.group_id for m in db.query(GroupMember.group_id).filter(
+        GroupMember.user_id == current_user.id,
+        GroupMember.is_approved == True
+    ).all()]
     
     return db.query(Group).filter(
         (Group.is_private == False) | (Group.id.in_(my_group_ids))
@@ -131,7 +147,7 @@ def get_my_and_public_groups(
 ):
     return list_my_and_public_groups(db, current_user)
 
-@router.get("/{group_id}", response_model=GroupResponse)
+@router.get("/{group_id}", response_model=GroupDetailResponse)
 def get_group_details(
     group_id: UUID,
     db: Session = Depends(get_db),
@@ -152,7 +168,7 @@ def get_group_details(
         if not membership and current_user.role != "system_admin":
             raise HTTPException(status_code=403, detail="Acesso negado: Este é um grupo privado.")
             
-    return group
+    return serialize_group_detail(group, check_group_admin(db, group_id, current_user.id))
 
 @router.get("/{group_id}/members", response_model=List[GroupMemberResponse])
 def get_group_members(

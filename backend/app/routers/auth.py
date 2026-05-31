@@ -3,12 +3,18 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from ..db import get_db
-from ..models import User, AuditLog, SystemInvitation, SystemSetting
-from ..schemas import UserCreate, UserResponse, UserUpdate, Token
+from ..models import User, AuditLog, SystemInvitation, SystemSetting, PasswordResetToken
+from ..schemas import UserCreate, UserResponse, UserUpdate, Token, PasswordResetRequest, PasswordResetConfirm
 from ..auth import get_password_hash, verify_password, create_access_token, get_current_active_user
-import uuid
+import hashlib
+import html
+import os
+import secrets
+import smtplib
 import time
 from collections import defaultdict
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # Simple in-memory rate limiting dictionary
 # Format: {ip: [timestamp1, timestamp2, ...]}
@@ -28,6 +34,65 @@ def check_rate_limit(ip: str) -> bool:
         return False
     rate_limit_db[ip].append(now)
     return True
+
+def hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def get_password_reset_link(token: str) -> str:
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return f"{base_url}/reset-password?token={token}"
+
+def send_password_reset_email(email: str, display_name: str, token: str) -> bool:
+    import logging
+
+    logger = logging.getLogger("bolao_password_reset")
+    smtp_host = os.getenv("SMTP_HOST", "172.25.0.1")
+    smtp_port = int(os.getenv("SMTP_PORT", "25"))
+    from_domain = os.getenv("FROM_DOMAIN", "bru.to")
+    sender_email = os.getenv("SMTP_FROM", f"no-reply@{from_domain}")
+    reset_link = get_password_reset_link(token)
+    safe_display_name = html.escape(display_name)
+    safe_reset_link = html.escape(reset_link, quote=True)
+
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "Redefinição de senha - Bolão Copa 2026"
+    message["From"] = sender_email
+    message["To"] = email
+
+    text = (
+        f"Olá, {display_name}!\n\n"
+        "Recebemos uma solicitação para redefinir sua senha do Bolão Copa 2026.\n"
+        f"Acesse o link abaixo para criar uma nova senha:\n\n{reset_link}\n\n"
+        "Se você não solicitou esta alteração, ignore este e-mail."
+    )
+    html_body = f"""\
+    <html>
+      <body>
+        <p>Olá, {safe_display_name}!</p>
+        <p>Recebemos uma solicitação para redefinir sua senha do <strong>Bolão Copa 2026</strong>.</p>
+        <p><a href="{safe_reset_link}" style="background: #10b981; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Redefinir senha</a></p>
+        <p style="font-size: 0.875rem; color: #4b5563;">Se o botão não funcionar, copie e cole este endereço no navegador:<br>{safe_reset_link}</p>
+        <p>Se você não solicitou esta alteração, ignore este e-mail.</p>
+      </body>
+    </html>
+    """
+
+    message.attach(MIMEText(text, "plain", "utf-8"))
+    message.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            if os.getenv("SMTP_STARTTLS", "false").lower() == "true":
+                server.starttls()
+            username = os.getenv("SMTP_USERNAME")
+            password = os.getenv("SMTP_PASSWORD")
+            if username and password:
+                server.login(username, password)
+            server.sendmail(sender_email, email, message.as_string())
+        return True
+    except Exception as e:
+        logger.error(f"Falha ao enviar e-mail de redefinição para {email}: {str(e)}")
+        return False
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -197,6 +262,97 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     db.commit()
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.post("/password-reset/request")
+def request_password_reset(
+    reset_in: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    if not check_rate_limit(request.client.host if request.client else "unknown"):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Muitas solicitações de redefinição. Por favor, tente novamente mais tarde."
+        )
+
+    generic_response = {"message": "Se o e-mail estiver cadastrado, enviaremos um link para redefinição de senha."}
+    user = db.query(User).filter(User.email == reset_in.email).first()
+    if not user:
+        return generic_response
+
+    now = datetime.utcnow()
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at == None,
+        PasswordResetToken.expires_at > now
+    ).update({"used_at": now})
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_minutes = int(os.getenv("PASSWORD_RESET_EXPIRE_MINUTES", "60"))
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=hash_reset_token(raw_token),
+        expires_at=now + timedelta(minutes=expires_minutes)
+    )
+    db.add(reset_token)
+
+    audit = AuditLog(
+        user_id=user.id,
+        action="password_reset_request",
+        target_type="user",
+        target_id=str(user.id)
+    )
+    db.add(audit)
+    db.commit()
+
+    sent = send_password_reset_email(user.email, user.display_name, raw_token)
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Não foi possível enviar o e-mail de redefinição de senha."
+        )
+
+    return generic_response
+
+@router.post("/password-reset/confirm")
+def confirm_password_reset(
+    reset_in: PasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    now = datetime.utcnow()
+    token_hash = hash_reset_token(reset_in.token)
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at == None,
+        PasswordResetToken.expires_at > now
+    ).first()
+
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token de redefinição inválido ou expirado."
+        )
+
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token de redefinição inválido ou expirado."
+        )
+
+    user.hashed_password = get_password_hash(reset_in.password)
+    reset_token.used_at = now
+
+    audit = AuditLog(
+        user_id=user.id,
+        action="password_reset_confirm",
+        target_type="user",
+        target_id=str(user.id)
+    )
+    db.add(audit)
+    db.commit()
+
+    return {"message": "Senha redefinida com sucesso."}
 
 @router.post("/logout")
 def logout(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):

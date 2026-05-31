@@ -64,7 +64,7 @@ export default function GroupDetails() {
   }, [groupId])
 
   const copyInviteCode = () => {
-    if (!group) return
+    if (!group?.invite_code) return
     navigator.clipboard.writeText(group.invite_code)
     setSuccessMsg(`Código ${group.invite_code} copiado para a área de transferência!`)
     setTimeout(() => setSuccessMsg(''), 3000)
@@ -352,24 +352,24 @@ export default function GroupDetails() {
         <Grid item xs={12} md={4}>
           <Stack spacing={3}>
             {/* Invite Links and Codes */}
-            <Card>
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
-                  ✉️ Convidar Amigos
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-
-                <Typography variant="caption" color="text.secondary">Código de Convite:</Typography>
-                <Box display="flex" alignItems="center" gap={1} sx={{ mt: 0.5, mb: 3 }}>
-                  <Typography variant="h5" sx={{ fontWeight: 800, fontFamily: 'Outfit', bgcolor: 'background.default', px: 2, py: 1, borderRadius: 2, border: '1px solid #374151', flexGrow: 1, textAlign: 'center', letterSpacing: 2 }}>
-                    {group.invite_code}
+            {isGroupAdmin && (
+              <Card>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
+                    ✉️ Convidar Amigos
                   </Typography>
-                  <IconButton color="primary" onClick={copyInviteCode}>
-                    <CopyIcon />
-                  </IconButton>
-                </Box>
+                  <Divider sx={{ mb: 2 }} />
 
-                {isGroupAdmin && (
+                  <Typography variant="caption" color="text.secondary">Código de Convite:</Typography>
+                  <Box display="flex" alignItems="center" gap={1} sx={{ mt: 0.5, mb: 3 }}>
+                    <Typography variant="h5" sx={{ fontWeight: 800, fontFamily: 'Outfit', bgcolor: 'background.default', px: 2, py: 1, borderRadius: 2, border: '1px solid #374151', flexGrow: 1, textAlign: 'center', letterSpacing: 2 }}>
+                      {group.invite_code || '-'}
+                    </Typography>
+                    <IconButton color="primary" onClick={copyInviteCode} disabled={!group.invite_code}>
+                      <CopyIcon />
+                    </IconButton>
+                  </Box>
+
                   <Box component="form" onSubmit={handleSendInvite} sx={{ mb: 3 }}>
                     <Stack direction="row" spacing={1}>
                       <TextField
@@ -386,9 +386,7 @@ export default function GroupDetails() {
                       </Button>
                     </Stack>
                   </Box>
-                )}
 
-                {isGroupAdmin && (
                   <Stack spacing={1}>
                     <Button 
                       variant="outlined" 
@@ -411,9 +409,9 @@ export default function GroupDetails() {
                       {group.is_private ? 'Tornar Público' : 'Tornar Privado'}
                     </Button>
                   </Stack>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Pending Requests (Private Groups) */}
             {isGroupAdmin && pendingMembers.length > 0 && (

@@ -6,6 +6,7 @@ import os
 import io
 import qrcode
 from uuid import UUID
+from PIL import Image, UnidentifiedImageError
 
 from ..db import get_db
 from ..models import User, PixConfig, AuditLog
@@ -13,6 +14,78 @@ from ..schemas import PixConfigResponse, PixConfigUpdate, UserResponse
 from ..auth import get_current_active_user
 
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
+
+ALLOWED_PROOF_TYPES = {
+    ".png": {"content_types": {"image/png"}, "magic": b"\x89PNG\r\n\x1a\n", "media_type": "image/png"},
+    ".jpg": {"content_types": {"image/jpeg"}, "magic": b"\xff\xd8\xff", "media_type": "image/jpeg"},
+    ".jpeg": {"content_types": {"image/jpeg"}, "magic": b"\xff\xd8\xff", "media_type": "image/jpeg"},
+    ".pdf": {"content_types": {"application/pdf"}, "magic": b"%PDF-", "media_type": "application/pdf"},
+}
+
+PDF_ACTIVE_CONTENT_MARKERS = (
+    b"/JavaScript",
+    b"/JS",
+    b"/OpenAction",
+    b"/AA",
+    b"/Launch",
+    b"/EmbeddedFile",
+    b"/RichMedia",
+    b"/AcroForm",
+    b"/XFA",
+)
+
+def validate_payment_proof_upload(filename: str, content_type: str, content: bytes) -> tuple[str, str]:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in ALLOWED_PROOF_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Apenas arquivos PNG, JPG, JPEG e PDF são aceitos."
+        )
+
+    expected = ALLOWED_PROOF_TYPES[ext]
+    normalized_content_type = (content_type or "").split(";")[0].strip().lower()
+    if normalized_content_type not in expected["content_types"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O tipo MIME informado não corresponde ao formato do arquivo."
+        )
+
+    if not content.startswith(expected["magic"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O arquivo enviado não possui uma assinatura (magic bytes) válida para o formato informado."
+        )
+
+    if ext in [".png", ".jpg", ".jpeg"]:
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                image.verify()
+                detected_format = image.format
+        except (UnidentifiedImageError, OSError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A imagem enviada não pôde ser validada."
+            )
+
+        if ext == ".png" and detected_format != "PNG":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="O conteúdo do arquivo não é um PNG válido.")
+        if ext in [".jpg", ".jpeg"] and detected_format != "JPEG":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="O conteúdo do arquivo não é um JPEG válido.")
+
+    if ext == ".pdf":
+        if b"%%EOF" not in content[-2048:]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O PDF enviado não parece estar completo."
+            )
+        lowered = content.lower()
+        if any(marker.lower() in lowered for marker in PDF_ACTIVE_CONTENT_MARKERS):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PDFs com conteúdo ativo, scripts ou anexos embutidos não são aceitos."
+            )
+
+    return ext, expected["media_type"]
 
 def crc16_ccitt(data: str) -> str:
     """
@@ -194,26 +267,7 @@ async def submit_proof(
         )
         
     filename = file.filename or ""
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in [".png", ".jpg", ".jpeg", ".pdf"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Apenas arquivos PNG, JPG, JPEG e PDF são aceitos."
-        )
-        
-    is_valid = False
-    if content.startswith(b"\x89PNG\r\n\x1a\n"):
-        is_valid = True
-    elif content.startswith(b"\xff\xd8\xff"):
-        is_valid = True
-    elif content.startswith(b"%PDF"):
-        is_valid = True
-        
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="O arquivo enviado não possui uma assinatura (magic bytes) válida de imagem ou PDF."
-        )
+    ext, _ = validate_payment_proof_upload(filename, file.content_type or "", content)
         
     save_filename = f"proof_{current_user.id}{ext}"
     save_path = os.path.join("/app/uploads", save_filename)
@@ -268,9 +322,9 @@ def get_my_proof(
         )
         
     ext = os.path.splitext(current_user.payment_proof_filename)[1].lower()
-    media_type = "application/pdf" if ext == ".pdf" else f"image/{ext[1:]}"
+    media_type = ALLOWED_PROOF_TYPES.get(ext, {}).get("media_type", "application/octet-stream")
     
-    return FileResponse(path, media_type=media_type)
+    return FileResponse(path, media_type=media_type, headers={"X-Content-Type-Options": "nosniff"})
 
 @router.get("/proof/{user_id}")
 def get_user_proof(
@@ -302,9 +356,9 @@ def get_user_proof(
         )
         
     ext = os.path.splitext(user.payment_proof_filename)[1].lower()
-    media_type = "application/pdf" if ext == ".pdf" else f"image/{ext[1:]}"
+    media_type = ALLOWED_PROOF_TYPES.get(ext, {}).get("media_type", "application/octet-stream")
     
-    return FileResponse(path, media_type=media_type)
+    return FileResponse(path, media_type=media_type, headers={"X-Content-Type-Options": "nosniff"})
 
 @router.get("/admin/list", response_model=List[UserResponse])
 def admin_list_payments(

@@ -9,7 +9,7 @@ import secrets
 from fastapi.responses import StreamingResponse
 
 from ..db import get_db
-from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting
+from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting, Group
 from ..schemas import (
     MatchResponse, StageMultiplierResponse, StageMultiplierUpdate, MultiplierHistoryResponse,
     AnnouncementCreate, AnnouncementResponse, UserResponse, AuditLogResponse, SyncLogResponse, SyncMatchDiffResponse,
@@ -426,6 +426,15 @@ def create_announcement(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_system_admin)
 ):
+    if ann_in.target_type == "group":
+        if not ann_in.target_group_id:
+            raise HTTPException(status_code=400, detail="Grupo de destino é obrigatório para comunicados de grupo.")
+        group = db.query(Group).filter(Group.id == ann_in.target_group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Grupo de destino não encontrado.")
+    elif ann_in.target_group_id:
+        raise HTTPException(status_code=400, detail="Comunicados globais não devem informar grupo de destino.")
+
     new_ann = Announcement(
         title=ann_in.title,
         body=ann_in.body,

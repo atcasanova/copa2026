@@ -18,6 +18,7 @@ import Profile from './pages/Profile'
 import AdminPanel from './pages/AdminPanel'
 import Rules from './pages/Rules'
 import Auditoria from './pages/Auditoria'
+import ResetPassword from './pages/ResetPassword'
 
 // Auth Context
 const AuthContext = createContext(null)
@@ -62,6 +63,7 @@ function AppContent() {
       {/* Public Auth Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Protected Layout Routes */}
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>

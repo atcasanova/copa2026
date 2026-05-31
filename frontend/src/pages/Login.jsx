@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link as RouterLink } from 'react-router-dom'
 import { Box, Card, CardContent, TextField, Button, Typography, Link, Alert, Stack } from '@mui/material'
 import axios from 'axios'
 import { useAuth } from '../App'
@@ -99,11 +99,10 @@ export default function Login() {
                 {/* Password reset placeholder */}
                 <Box display="flex" justifyContent="flex-end">
                   <Link
-                    component="button"
-                    type="button"
+                    component={RouterLink}
+                    to="/reset-password"
                     variant="caption"
                     color="secondary.main"
-                    onClick={() => alert("A redefinição de senha estará disponível em uma atualização futura. Contate o administrador do sistema.")}
                     sx={{ textDecoration: 'none', fontWeight: 600 }}
                   >
                     Esqueceu sua senha?
