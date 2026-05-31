@@ -1,0 +1,788 @@
+import React, { useState, useEffect } from 'react'
+import {
+  Box, Card, CardContent, Typography, Grid, MenuItem, Select, FormControl,
+  InputLabel, FormControlLabel, Checkbox, Button, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, Paper, TextField, IconButton, Alert, Tooltip, Stack, Chip, Tabs, Tab
+} from '@mui/material'
+import {
+  Lock as LockIcon,
+  Save as SaveIcon,
+  CheckCircle as CheckIcon,
+  HourglassEmpty as PendingIcon,
+  ErrorOutline as WarningIcon
+} from '@mui/icons-material'
+import axios from 'axios'
+import { useAuth } from '../App'
+
+const getFlagUrl = (emoji) => {
+  if (!emoji || emoji === '🏳️') return null
+  const codePoints = Array.from(emoji).map(char => char.codePointAt(0))
+  if (codePoints.length >= 2 && codePoints[0] >= 127462 && codePoints[0] <= 127487) {
+    const char1 = String.fromCharCode(codePoints[0] - 127397)
+    const char2 = String.fromCharCode(codePoints[1] - 127397)
+    const countryCode = (char1 + char2).toLowerCase()
+    return `https://flagcdn.com/w40/${countryCode}.png`
+  }
+  return null
+}
+
+export default function Predictions() {
+  const { user } = useAuth()
+  
+  // Data lists
+  const [matches, setMatches] = useState([])
+  const [predictions, setPredictions] = useState({}) // match_id -> prediction
+  
+  // Grouping and Pagination State
+  const [groupingMode, setGroupingMode] = useState('date') // 'date' | 'group'
+  const [currentPageIndex, setCurrentPageIndex] = useState(0)
+
+  // Filters within active page
+  const [showMissingOnly, setShowMissingOnly] = useState(false)
+  const [showLockingSoon, setShowLockingSoon] = useState(false)
+  
+  // UI states
+  const [saveStates, setSaveStates] = useState({}) // match_id -> 'saved' | 'saving' | 'error' | 'unsaved'
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const autoSelectPage = (loadedMatches, mode) => {
+    if (!loadedMatches || loadedMatches.length === 0) return;
+
+    // Find the first match that is not finished
+    const nextMatch = loadedMatches.find(m => m.status !== 'finished' && m.status !== 'score_confirmed');
+    
+    if (!nextMatch) {
+      // If all matches are completed, go to the last page
+      if (mode === 'date') {
+        const sortedDates = [...new Set(loadedMatches.map(m => m.date))].sort();
+        const datePagesCount = Math.ceil(sortedDates.length / 3);
+        setCurrentPageIndex(Math.max(0, datePagesCount - 1));
+      } else {
+        const groupsInMatches = [...new Set(loadedMatches.filter(m => m.group_name).map(m => m.group_name))].sort();
+        const knockoutStagesInMatches = [...new Set(loadedMatches.filter(m => !m.group_name).map(m => m.stage))];
+        const groupPagesCount = groupsInMatches.length + knockoutStagesInMatches.length;
+        setCurrentPageIndex(Math.max(0, groupPagesCount - 1));
+      }
+      return;
+    }
+
+    if (mode === 'date') {
+      const sortedDates = [...new Set(loadedMatches.map(m => m.date))].sort();
+      const matchDateIdx = sortedDates.indexOf(nextMatch.date);
+      if (matchDateIdx !== -1) {
+        const pageIdx = Math.floor(matchDateIdx / 3);
+        setCurrentPageIndex(pageIdx);
+      }
+    } else {
+      const groupsInMatches = [...new Set(loadedMatches.filter(m => m.group_name).map(m => m.group_name))].sort();
+      const knockoutStagesInMatches = [...new Set(loadedMatches.filter(m => !m.group_name).map(m => m.stage))];
+      
+      let pageIdx = -1;
+      if (nextMatch.group_name) {
+        pageIdx = groupsInMatches.indexOf(nextMatch.group_name);
+      } else {
+        const stageIdx = knockoutStagesInMatches.indexOf(nextMatch.stage);
+        if (stageIdx !== -1) {
+          pageIdx = groupsInMatches.length + stageIdx;
+        }
+      }
+
+      if (pageIdx !== -1) {
+        setCurrentPageIndex(pageIdx);
+      }
+    }
+  };
+
+  const handleGroupingModeChange = (newMode) => {
+    setGroupingMode(newMode);
+    autoSelectPage(matches, newMode);
+  };
+
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      
+      // Load matches
+      const matchesRes = await axios.get('/api/matches')
+      const loadedMatches = matchesRes.data;
+      setMatches(loadedMatches)
+
+      // Load user predictions
+      const predsRes = await axios.get('/api/predictions/my-predictions')
+      const predsMap = {}
+      predsRes.data.forEach(p => {
+        predsMap[p.match_id] = p
+      })
+      setPredictions(predsMap)
+
+      // Auto-select page on load
+      autoSelectPage(loadedMatches, groupingMode)
+    } catch (err) {
+      setError('Erro ao carregar os dados das partidas. Tente novamente.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  // Auto-save function triggered on blur
+  const handleAutoSave = async (matchId, goals1, goals2, qualName) => {
+    // Both goals must be defined (non-empty)
+    if (goals1 === undefined || goals2 === undefined || goals1 === '' || goals2 === '') {
+      return
+    }
+
+    setSaveStates(prev => ({ ...prev, [matchId]: 'saving' }))
+    try {
+      const res = await axios.post(`/api/predictions/save?match_id=${matchId}`, {
+        goals_team1: parseInt(goals1),
+        goals_team2: parseInt(goals2),
+        qualified_team_name: qualName || null
+      })
+      
+      // Update local predictions map
+      setPredictions(prev => ({
+        ...prev,
+        [matchId]: res.data
+      }))
+      setSaveStates(prev => ({ ...prev, [matchId]: 'saved' }))
+      
+      // Reset saved indicator after 3 seconds
+      setTimeout(() => {
+        setSaveStates(prev => {
+          if (prev[matchId] === 'saved') {
+            const next = { ...prev }
+            delete next[matchId]
+            return next
+          }
+          return prev
+        })
+      }, 3000)
+    } catch (err) {
+      setSaveStates(prev => ({ ...prev, [matchId]: 'error' }))
+    }
+  }
+
+  const handleInputChange = (matchId, field, value) => {
+    // Only permit non-negative integers
+    if (value !== '' && !/^\d+$/.test(value)) return
+    
+    // Check if match is locked (client safety)
+    const match = matches.find(m => m.id === matchId)
+    if (match && isLocked(match.kickoff_time)) {
+      return
+    }
+
+    setPredictions(prev => {
+      const current = prev[matchId] || { match_id: matchId }
+      return {
+        ...prev,
+        [matchId]: {
+          ...current,
+          [field]: value
+        }
+      }
+    })
+    setSaveStates(prev => ({ ...prev, [matchId]: 'unsaved' }))
+  }
+
+  const isLocked = (kickoffTimeIso) => {
+    const now = new Date()
+    const kickoff = new Date(kickoffTimeIso)
+    const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000) // 3 hours before
+    return now >= lockTime
+  }
+
+  const isLockingSoon = (kickoffTimeIso) => {
+    const now = new Date()
+    const kickoff = new Date(kickoffTimeIso)
+    const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000)
+    const warningTime = new Date(now.getTime() + 24 * 60 * 60 * 1000) // 24 hours warning
+    return now < lockTime && lockTime <= warningTime
+  }
+
+  const formatDateTime = (isoString) => {
+    const d = new Date(isoString)
+    const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'America/Sao_Paulo' })
+    const date = d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'numeric', timeZone: 'America/Sao_Paulo' })
+    const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+    return `${weekday.toUpperCase()}, ${date} - ${time}`
+  }
+
+  // ==========================================
+  // Pagination Data Calculations
+  // ==========================================
+  
+  // 1. Date-based chunks (3 days)
+  const sortedDates = [...new Set(matches.map(m => m.date))].sort()
+  const datePages = []
+  for (let i = 0; i < sortedDates.length; i += 3) {
+    datePages.push(sortedDates.slice(i, i + 3))
+  }
+
+  // 2. Group & Stage chunks
+  const groupsInMatches = [...new Set(matches.filter(m => m.group_name).map(m => m.group_name))].sort()
+  const knockoutStagesInMatches = [...new Set(matches.filter(m => !m.group_name).map(m => m.stage))]
+  const groupPages = [
+    ...groupsInMatches.map(g => ({ type: 'group', value: g, label: `Grupo ${g}` })),
+    ...knockoutStagesInMatches.map(s => {
+      let label = s;
+      if (s === 'Round of 32') label = '16-avos';
+      else if (s === 'Round of 16') label = 'Oitavas';
+      else if (s === 'Quarter-finals') label = 'Quartas';
+      else if (s === 'Semi-finals') label = 'Semifinais';
+      else if (s === 'Final') label = 'Finais';
+      return { type: 'stage', value: s, label };
+    })
+  ]
+
+  const totalPages = groupingMode === 'date' ? datePages.length : groupPages.length
+  const safePageIndex = currentPageIndex >= totalPages ? 0 : currentPageIndex
+
+  // Filter matches for the current active page
+  const activeMatchesOnPage = matches.filter(match => {
+    let onPage = false
+    if (groupingMode === 'date') {
+      const activeDates = datePages[safePageIndex] || []
+      onPage = activeDates.includes(match.date)
+    } else {
+      const activePage = groupPages[safePageIndex]
+      if (activePage) {
+        if (activePage.type === 'group') {
+          onPage = match.group_name === activePage.value
+        } else {
+          onPage = match.stage === activePage.value && !match.group_name
+        }
+      }
+    }
+    if (!onPage) return false
+
+    // Apply secondary filters
+    const pred = predictions[match.id]
+    const hasPred = pred && pred.goals_team1 !== undefined && pred.goals_team2 !== undefined && pred.goals_team1 !== '' && pred.goals_team2 !== ''
+    
+    if (showMissingOnly) {
+      if (isLocked(match.kickoff_time)) return false
+      if (hasPred) return false
+    }
+    if (showLockingSoon) {
+      if (!isLockingSoon(match.kickoff_time)) return false
+    }
+    return true
+  })
+
+  return (
+    <Box sx={{ mt: 1 }}>
+      <Typography variant="h4" gutterBottom sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 3 }}>
+        ⚽ Registro de Palpites
+      </Typography>
+
+      {user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved' && (
+        <Alert severity="warning" sx={{ mb: 3, borderRadius: 3, fontWeight: 600 }}>
+          ⚠️ Acesso Bloqueado: Para poder registrar e editar palpites, você precisa ter seu pagamento aprovado pelo administrador. 
+          Acesse a página de <a href="/profile" style={{ color: '#fff', textDecoration: 'underline', fontWeight: 'bold' }}>seu Perfil</a> para enviar seu comprovante.
+        </Alert>
+      )}
+
+      {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
+
+      {/* Filters Card */}
+      <Card sx={{ mb: 4 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Box sx={{ 
+            display: 'flex', 
+            flexDirection: { xs: 'column', md: 'row' },
+            justifyContent: 'space-between', 
+            alignItems: { xs: 'stretch', md: 'center' }, 
+            gap: 2 
+          }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={1}>
+              <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.secondary' }}>Agrupar por:</Typography>
+              <Box display="flex" gap={1} flexWrap="wrap">
+                <Chip 
+                  label="🗓️ Datas (3 dias)" 
+                  clickable 
+                  color={groupingMode === 'date' ? 'primary' : 'default'} 
+                  variant={groupingMode === 'date' ? 'filled' : 'outlined'} 
+                  onClick={() => handleGroupingModeChange('date')} 
+                  size="small"
+                />
+                <Chip 
+                  label="🏆 Grupos & Fases" 
+                  clickable 
+                  color={groupingMode === 'group' ? 'primary' : 'default'} 
+                  variant={groupingMode === 'group' ? 'filled' : 'outlined'} 
+                  onClick={() => handleGroupingModeChange('group')} 
+                  size="small"
+                />
+              </Box>
+            </Stack>
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} alignItems="flex-start" flexWrap="wrap">
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showMissingOnly}
+                    onChange={(e) => {
+                      setShowMissingOnly(e.target.checked)
+                      if (e.target.checked) setShowLockingSoon(false)
+                    }}
+                    color="primary"
+                    size="small"
+                  />
+                }
+                label="Apenas palpites faltantes"
+                componentsProps={{ typography: { variant: 'body2', fontWeight: 600 } }}
+                sx={{ mr: 0 }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showLockingSoon}
+                    onChange={(e) => {
+                      setShowLockingSoon(e.target.checked)
+                      if (e.target.checked) setShowMissingOnly(false)
+                    }}
+                    color="primary"
+                    size="small"
+                  />
+                }
+                label="Bloqueando em 24h"
+                componentsProps={{ typography: { variant: 'body2', fontWeight: 600 } }}
+                sx={{ mr: 0 }}
+              />
+            </Stack>
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Pagination Tabs Bar */}
+      {totalPages > 0 && (
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}>
+          <Tabs 
+            value={safePageIndex} 
+            onChange={(e, val) => setCurrentPageIndex(val)} 
+            variant="scrollable" 
+            scrollButtons="auto"
+            sx={{
+              '& .MuiTab-root': {
+                fontFamily: 'Outfit',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                textTransform: 'none',
+                minWidth: 100,
+              }
+            }}
+          >
+            {groupingMode === 'date' ? (
+              datePages.map((dates, idx) => {
+                const start = new Date(dates[0] + 'T00:00:00');
+                const end = new Date(dates[dates.length - 1] + 'T00:00:00');
+                const label = `${start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} a ${end.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+                return <Tab key={idx} label={label} />;
+              })
+            ) : (
+              groupPages.map((page, idx) => (
+                <Tab key={idx} label={page.label} />
+              ))
+            )}
+          </Tabs>
+        </Box>
+      )}
+
+      {/* Desktop Table View */}
+      <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+        <TableContainer component={Paper} sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Fase / Estádio</TableCell>
+                <TableCell>Horário (SP)</TableCell>
+                <TableCell align="right" sx={{ width: '25%' }}>Time A</TableCell>
+                <TableCell align="center" sx={{ width: '18%' }}>Palpite</TableCell>
+                <TableCell align="left" sx={{ width: '25%' }}>Time B</TableCell>
+                <TableCell align="center">Resultado / Pontuação</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
+                    Carregando partidas...
+                  </TableCell>
+                </TableRow>
+              ) : activeMatchesOnPage.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                    Nenhuma partida encontrada nesta página para os filtros selecionados.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                activeMatchesOnPage.map((match) => {
+                  const locked = isLocked(match.kickoff_time);
+                  const soon = isLockingSoon(match.kickoff_time);
+                  const pred = predictions[match.id] || {};
+                  const goals1 = pred.goals_team1 ?? '';
+                  const goals2 = pred.goals_team2 ?? '';
+                  const saveState = saveStates[match.id];
+                  
+                  const isFinished = match.status === 'finished' || match.status === 'score_confirmed';
+
+                  return (
+                    <TableRow 
+                      key={match.id}
+                      sx={{
+                        bgcolor: soon && !locked ? 'rgba(245, 158, 11, 0.02)' : isFinished ? 'rgba(255, 255, 255, 0.005)' : 'transparent',
+                        '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.01)' }
+                      }}
+                    >
+                      {/* Stage & Stadium */}
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {match.round}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          📍 {match.ground}
+                        </Typography>
+                      </TableCell>
+
+                      {/* Date/Time */}
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {formatDateTime(match.kickoff_time)}
+                        </Typography>
+                        {soon && !locked && (
+                          <Typography variant="caption" color="warning.main" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, fontWeight: 'bold' }}>
+                            <WarningIcon fontSize="inherit" /> Bloqueia em breve
+                          </Typography>
+                        )}
+                        {locked && !isFinished && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, fontWeight: 'bold' }}>
+                            <LockIcon fontSize="inherit" /> Bloqueado
+                          </Typography>
+                        )}
+                        {isFinished && (
+                          <Chip 
+                            label="Encerrado" 
+                            size="small" 
+                            variant="outlined" 
+                            sx={{ height: 16, fontSize: '0.6rem', color: 'text.secondary', borderColor: 'divider', mt: 0.5 }} 
+                          />
+                        )}
+                      </TableCell>
+
+                      {/* Team A */}
+                      <TableCell align="right" sx={{ fontWeight: 700, fontSize: '1rem' }}>
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                          {getFlagUrl(match.team1?.flag_icon) ? (
+                            <img src={getFlagUrl(match.team1.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                          ) : (
+                            <span>{match.team1?.flag_icon}</span>
+                          )}
+                          {match.team1_name}
+                        </Box>
+                      </TableCell>
+
+                      {/* Prediction column */}
+                      <TableCell align="center">
+                        {locked ? (
+                          goals1 !== '' && goals2 !== '' ? (
+                            <Chip 
+                              label={`${goals1} x ${goals2}`} 
+                              color="primary" 
+                              variant="outlined" 
+                              sx={{ fontWeight: 'bold', fontFamily: 'Outfit', fontSize: '1rem', px: 1 }} 
+                            />
+                          ) : (
+                            <Chip 
+                              label="Sem palpite" 
+                              color="error" 
+                              variant="outlined" 
+                              size="small" 
+                              sx={{ fontSize: '0.8rem' }} 
+                            />
+                          )
+                        ) : (
+                          <Stack direction="column" spacing={1} alignItems="center">
+                            <Box display="flex" alignItems="center" justifyContent="center" gap={1.5}>
+                              <TextField
+                                size="small"
+                                disabled={locked || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
+                                sx={{ width: 55 }}
+                                inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem' } }}
+                                value={goals1}
+                                onChange={(e) => handleInputChange(match.id, 'goals_team1', e.target.value)}
+                                onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                              />
+                              <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>x</Typography>
+                              <TextField
+                                size="small"
+                                disabled={locked || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
+                                sx={{ width: 55 }}
+                                inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem' } }}
+                                value={goals2}
+                                onChange={(e) => handleInputChange(match.id, 'goals_team2', e.target.value)}
+                                onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                              />
+                            </Box>
+                          </Stack>
+                        )}
+                      </TableCell>
+
+                      {/* Team B */}
+                      <TableCell align="left" sx={{ fontWeight: 700, fontSize: '1rem' }}>
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                          {match.team2_name}
+                          {getFlagUrl(match.team2?.flag_icon) ? (
+                            <img src={getFlagUrl(match.team2.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                          ) : (
+                            <span>{match.team2?.flag_icon}</span>
+                          )}
+                        </Box>
+                      </TableCell>
+
+                      {/* Status / Results column */}
+                      <TableCell align="center">
+                        {isFinished ? (
+                          <Box sx={{ py: 0.5 }}>
+                            <Typography variant="caption" sx={{ display: 'block', fontWeight: 800, color: 'text.primary', mb: 0.5 }}>
+                              Resultado: {match.score_ft_team1} x {match.score_ft_team2}
+                            </Typography>
+                            {pred.points_earned !== undefined && pred.points_earned !== null ? (
+                              <Chip 
+                                label={`+${pred.points_earned} pts`} 
+                                color={pred.points_earned > 0 ? 'success' : 'default'} 
+                                size="small" 
+                                sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 0.5 }} 
+                              />
+                            ) : (
+                              <Chip 
+                                label="0 pts" 
+                                size="small" 
+                                sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 0.5 }} 
+                              />
+                            )}
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.65rem', maxWidth: 150, mx: 'auto', lineHeight: 1.1 }}>
+                              {pred.scoring_explanation}
+                            </Typography>
+                          </Box>
+                        ) : locked ? (
+                          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                            Jogo em andamento
+                          </Typography>
+                        ) : (
+                          <Box>
+                            {saveState === 'saving' && <Typography variant="caption" color="text.secondary">Salvando...</Typography>}
+                            {saveState === 'saved' && (
+                              <Typography variant="caption" color="primary.main" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
+                                <CheckIcon fontSize="inherit" /> Salvo
+                              </Typography>
+                            )}
+                            {saveState === 'error' && <Typography variant="caption" color="error.main">Erro ao salvar</Typography>}
+                            {saveState === 'unsaved' && <Typography variant="caption" color="warning.main">Não salvo</Typography>}
+                            {!saveState && goals1 !== '' && goals2 !== '' && (
+                              <Typography variant="caption" color="text.secondary">Salvo</Typography>
+                            )}
+                            {!saveState && (goals1 === '' || goals2 === '') && (
+                              <Typography variant="caption" color="error.main">Sem palpite</Typography>
+                            )}
+                          </Box>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+
+      {/* Mobile Stacked Card View */}
+      <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+        {loading ? (
+          <Alert severity="info" sx={{ borderRadius: 2 }}>Carregando palpites...</Alert>
+        ) : activeMatchesOnPage.length === 0 ? (
+          <Alert severity="info" sx={{ borderRadius: 2 }}>
+            Nenhuma partida encontrada nesta página para os filtros selecionados.
+          </Alert>
+        ) : (
+          <Stack spacing={2}>
+            {activeMatchesOnPage.map((match) => {
+              const locked = isLocked(match.kickoff_time);
+              const soon = isLockingSoon(match.kickoff_time);
+              const pred = predictions[match.id] || {};
+              const goals1 = pred.goals_team1 ?? '';
+              const goals2 = pred.goals_team2 ?? '';
+              const saveState = saveStates[match.id];
+              const isFinished = match.status === 'finished' || match.status === 'score_confirmed';
+
+              return (
+                <Card 
+                  key={match.id} 
+                  sx={{ 
+                    borderRadius: 3, 
+                    border: '1px solid',
+                    borderColor: soon && !locked ? 'warning.main' : 'divider',
+                    bgcolor: isFinished ? 'rgba(255,255,255,0.005)' : 'background.default',
+                    overflow: 'visible'
+                  }}
+                >
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    {/* Header info */}
+                    <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                      <Box>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', display: 'block' }}>
+                          {match.round} • {match.ground.split('(')[0].trim()}
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 600, color: soon && !locked ? 'warning.main' : 'primary.main' }}>
+                          {formatDateTime(match.kickoff_time)}
+                        </Typography>
+                      </Box>
+                      {soon && !locked && (
+                        <Chip label="Bloqueia logo" color="warning" size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
+                      )}
+                      {locked && !isFinished && (
+                        <Chip icon={<LockIcon sx={{ fontSize: '0.8rem !important' }} />} label="Bloqueado" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />
+                      )}
+                      {isFinished && (
+                        <Chip label="Encerrado" size="small" color="default" variant="outlined" sx={{ fontSize: '0.65rem', height: 18, color: 'text.secondary', borderColor: 'divider' }} />
+                      )}
+                    </Box>
+
+                    {/* Match Row */}
+                    <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ gap: 0.5, mb: 1.5 }}>
+                      {/* Team A */}
+                      <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-end' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {match.team1?.fifa_code || match.team1_name}
+                        </Typography>
+                        {getFlagUrl(match.team1?.flag_icon) ? (
+                          <img src={getFlagUrl(match.team1.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
+                        ) : (
+                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team1?.flag_icon}</span>
+                        )}
+                      </Box>
+
+                      {/* Guess display or inputs */}
+                      {locked ? (
+                        <Box sx={{ flexShrink: 0 }}>
+                          {goals1 !== '' && goals2 !== '' ? (
+                            <Chip 
+                              label={`${goals1} x ${goals2}`} 
+                              color="primary" 
+                              variant="outlined" 
+                              size="small"
+                              sx={{ fontWeight: 'bold', fontFamily: 'Outfit' }} 
+                            />
+                          ) : (
+                            <Chip 
+                              label="Sem palpite" 
+                              color="error" 
+                              variant="outlined" 
+                              size="small" 
+                            />
+                          )}
+                        </Box>
+                      ) : (
+                        <Box display="flex" alignItems="center" gap={0.5} sx={{ flexShrink: 0, px: 0.5 }}>
+                          <TextField
+                            size="small"
+                            disabled={locked || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
+                            sx={{ width: 45 }}
+                            inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1rem' } }}
+                            value={goals1}
+                            onChange={(e) => handleInputChange(match.id, 'goals_team1', e.target.value)}
+                            onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                          />
+                          <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>x</Typography>
+                          <TextField
+                            size="small"
+                            disabled={locked || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
+                            sx={{ width: 45 }}
+                            inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1rem' } }}
+                            value={goals2}
+                            onChange={(e) => handleInputChange(match.id, 'goals_team2', e.target.value)}
+                            onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                          />
+                        </Box>
+                      )}
+
+                      {/* Team B */}
+                      <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-start' }}>
+                        {getFlagUrl(match.team2?.flag_icon) ? (
+                          <img src={getFlagUrl(match.team2.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
+                        ) : (
+                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team2?.flag_icon}</span>
+                        )}
+                        <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {match.team2?.fifa_code || match.team2_name}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    {/* Result and points row */}
+                    <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ pt: 1, borderTop: '1px solid #1f2937' }}>
+                      {/* Explanatory text / status */}
+                      <Box sx={{ flexGrow: 1, pr: 1 }}>
+                        {isFinished && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.65rem', lineHeight: 1.1 }}>
+                            {pred.scoring_explanation}
+                          </Typography>
+                        )}
+                      </Box>
+
+                      {/* Outcome display */}
+                      <Box sx={{ textAlign: 'right' }}>
+                        {isFinished ? (
+                          <Box>
+                            <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', color: 'text.primary', mb: 0.5 }}>
+                              Resultado: {match.score_ft_team1} x {match.score_ft_team2}
+                            </Typography>
+                            {pred.points_earned !== undefined && pred.points_earned !== null ? (
+                              <Chip 
+                                label={`+${pred.points_earned} pts`} 
+                                color={pred.points_earned > 0 ? 'success' : 'default'} 
+                                size="small" 
+                                sx={{ fontWeight: 800, fontFamily: 'Outfit' }} 
+                              />
+                            ) : (
+                              <Chip 
+                                label="0 pts" 
+                                size="small" 
+                                sx={{ fontWeight: 800, fontFamily: 'Outfit' }} 
+                              />
+                            )}
+                          </Box>
+                        ) : locked ? (
+                          <Typography variant="caption" color="text.secondary">Jogo em andamento</Typography>
+                        ) : (
+                          <Box>
+                            {saveState === 'saving' && <Typography variant="caption" color="text.secondary">Salvando...</Typography>}
+                            {saveState === 'saved' && <Typography variant="caption" color="primary.main">Salvo</Typography>}
+                            {saveState === 'error' && <Typography variant="caption" color="error.main">Erro</Typography>}
+                            {saveState === 'unsaved' && <Typography variant="caption" color="warning.main">Não salvo</Typography>}
+                            {!saveState && goals1 !== '' && goals2 !== '' && (
+                              <Typography variant="caption" color="text.secondary">Salvo</Typography>
+                            )}
+                            {!saveState && (goals1 === '' || goals2 === '') && (
+                              <Typography variant="caption" color="error.main">Sem palpite</Typography>
+                            )}
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </Stack>
+        )}
+      </Box>
+    </Box>
+  )
+}

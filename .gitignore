@@ -1,0 +1,41 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+web_modules/
+
+# Environment files and credentials
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Local Databases & storage
+*.db
+*.sqlite
+backend/test.db
+backend/uploads/
+uploads/
+
+# Python caching & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+dist/
+
+# OS and IDE configuration files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.sln
+*.suo
+*.user
+*.userossc
+*.sln.docstates
