@@ -29,13 +29,15 @@ axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function AppContent() {
   const { token, logout } = useAuth()
+  const navigate = useNavigate()
 
   // Setup Axios interceptors
   useEffect(() => {
     const requestInterceptor = axios.interceptors.request.use(
       (config) => {
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
+        const activeToken = localStorage.getItem('token')
+        if (activeToken) {
+          config.headers.Authorization = `Bearer ${activeToken}`
         }
         return config
       },
@@ -46,7 +48,11 @@ function AppContent() {
       (response) => response,
       (error) => {
         if (error.response && error.response.status === 401) {
-          logout()
+          const isLoginRequest = error.config && error.config.url && error.config.url.includes('/api/auth/login')
+          if (!isLoginRequest) {
+            logout()
+            navigate('/login')
+          }
         }
         return Promise.reject(error)
       }
@@ -56,7 +62,7 @@ function AppContent() {
       axios.interceptors.request.eject(requestInterceptor)
       axios.interceptors.response.eject(responseInterceptor)
     }
-  }, [token, logout])
+  }, [logout, navigate])
 
   return (
     <Routes>
