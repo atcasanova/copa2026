@@ -10,9 +10,9 @@ from app.sync import parse_kickoff_to_utc, ensure_team_exists, sync_openfootball
 # ==========================================
 
 def test_calculate_base_points():
-    # Exact score -> 8 points
+    # Exact score -> 10 points
     pts, exp = calculate_base_points(2, 1, None, 2, 1, None, False)
-    assert pts == 8
+    assert pts == 10
     
     # Correct result and goals difference -> 6 points
     pts, exp = calculate_base_points(3, 2, None, 2, 1, None, False)
@@ -81,10 +81,10 @@ def test_stage_multipliers(db_session):
     
     score_prediction(db_session, pred, match)
     
-    # Base points = 8. Multiplier = 3.0. Final points = 24.
-    assert pred.base_points == 8
+    # Base points = 10. Multiplier = 3.0. Final points = 30.
+    assert pred.base_points == 10
     assert float(pred.multiplier_used) == 3.0
-    assert pred.points_earned == 24
+    assert pred.points_earned == 30
     assert "Multiplicador 3.0" in pred.scoring_explanation
 
 # ==========================================
@@ -129,8 +129,8 @@ def test_knockout_draw_handling(db_session):
 
     score_prediction(db_session, pred, match)
     
-    # Base score is 8 because prediction matches exactly the full-time score (1x1).
-    assert pred.base_points == 8
+    # Base score is 10 because prediction matches exactly the full-time score (1x1).
+    assert pred.base_points == 10
 
     # User predicts draw 2x2, France qualifying.
     pred2 = Prediction(
@@ -548,6 +548,4 @@ def test_ranking_cache_flow(client, db_session, test_users):
 
     # Cache should be cleared (invalidated)
     assert db_session.query(RankingCache).count() == 0
-
-
 

@@ -30,7 +30,7 @@ def calculate_base_points(
 ) -> tuple[int, str]:
     """
     Scoring system rules (PT-BR explanations):
-    - Exact score: 8 pts
+    - Exact score: 10 pts
     - Correct result and goals difference (not exact): 6 pts
     - Correct result + one team goals: 4 pts
     - Correct result only: 3 pts
@@ -55,7 +55,7 @@ def calculate_base_points(
     if act_result == pred_result:
         # Exact score check
         if act_goals1 == pred_goals1 and act_goals2 == pred_goals2:
-            return 8, "Placar exato (8 pontos)"
+            return 10, "Placar exato (10 pontos)"
         
         # Correct result and goals difference (not exact)
         act_diff = act_goals1 - act_goals2
@@ -285,7 +285,7 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
             if pred.points_earned is not None:
                 total_points += pred.points_earned
                 # Check base points to identify exact vs correct results
-                if pred.base_points == 8:
+                if pred.base_points == 10:
                     exact_scores += 1
                     correct_results += 1
                 elif pred.base_points in [3, 4, 6]:
@@ -388,4 +388,3 @@ def map_round_to_stage(round_str: str) -> str:
     elif "final" in r or "third" in r:
         return "Final"
     return "Group Stage"
-

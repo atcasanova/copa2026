@@ -172,8 +172,8 @@ export default function Rankings() {
               <TableCell align="center">Pts Totais</TableCell>
               <TableCell align="center">
                 <Box display="inline-flex" alignItems="center" gap={0.5}>
-                  Placar Exato (8)
-                  <Tooltip title="Número de palpites com placar 100% correto (8 pontos)">
+                  Placar Exato (10)
+                  <Tooltip title="Número de palpites com placar 100% correto (10 pontos)">
                     <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
                   </Tooltip>
                 </Box>
@@ -320,7 +320,7 @@ export default function Rankings() {
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.6 }}>
             1. Maior pontuação total; <br />
-            2. Maior número de palpites com placar exato (8 pontos); <br />
+            2. Maior número de palpites com placar exato (10 pontos); <br />
             3. Maior número de palpites com resultado correto (3, 4 ou 6 pontos); <br />
             4. Maior pontuação obtida na fase eliminatória (Mata-mata); <br />
             5. Menor número de palpites perdidos/faltantes em jogos já bloqueados; <br />

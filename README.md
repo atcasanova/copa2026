@@ -90,7 +90,7 @@ No primeiro boot do contêiner backend:
 ## Regras de Pontuação (Scoring System)
 
 A nota base de cada palpite é avaliada contra o resultado regulamentar oficial de 120 minutos (tempo normal mais acréscimos e prorrogações), excluindo cobranças de pênaltis.
-- **Placar Exato**: 8 pontos (ex: Palpite 2x1, Oficial 2x1).
+- **Placar Exato**: 10 pontos (ex: Palpite 2x1, Oficial 2x1).
 - **Resultado Correto e Diferença de Gols (não exato)**: 6 pontos (ex: Palpite 3x2, Oficial 2x1).
 - **Resultado Correto + Gols de um dos times**: 4 pontos (ex: Palpite 2x0 ou 3x1, Oficial 2x1).
 - **Resultado Correto Apenas**: 3 pontos (ex: Palpite 4x2, Oficial 2x1).
@@ -114,7 +114,7 @@ Os multiplicadores padrão recomendados (editáveis por administradores) são:
 
 O ranking oficial é calculado de forma determinística utilizando os seguintes tie-breakers em ordem de prioridade:
 1. Maior número de pontos totais acumulados.
-2. Maior quantidade de placares exatos acertados (8 pontos).
+2. Maior quantidade de placares exatos acertados (10 pontos).
 3. Maior quantidade de resultados gerais corretos (3, 4 ou 6 pontos).
 4. Maior pontuação obtida nas fases eliminatórias (Mata-mata).
 5. Menor quantidade de palpites perdidos (missing predictions) em confrontos já iniciados/bloqueados.

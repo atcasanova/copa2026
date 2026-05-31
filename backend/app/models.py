@@ -286,4 +286,10 @@ class SystemInvitation(Base):
     used_by = relationship("User", foreign_keys=[used_by_id])
 
 
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

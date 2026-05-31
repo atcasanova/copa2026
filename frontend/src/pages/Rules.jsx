@@ -83,7 +83,7 @@ export default function Rules() {
                     <TableBody>
                       <TableRow>
                         <TableCell sx={{ fontWeight: 600 }}>Placar Exato</TableCell>
-                        <TableCell align="center" sx={{ fontWeight: 700, color: 'primary.light' }}>8</TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 700, color: 'primary.light' }}>10</TableCell>
                         <TableCell color="text.secondary">Palpite 2x1 → Resultado 2x1</TableCell>
                       </TableRow>
                       <TableRow>
@@ -252,7 +252,7 @@ export default function Rules() {
                 <List disablePadding>
                   {[
                     '1. Maior pontuação total obtida no sistema',
-                    '2. Maior número de acertos de Placar Exato (8 pontos)',
+                    '2. Maior número de acertos de Placar Exato (10 pontos)',
                     '3. Maior número de acertos de Resultado Correto (3, 4 ou 6 pontos)',
                     '4. Maior pontuação obtida na fase de mata-mata',
                     '5. Menor quantidade de palpites faltantes em partidas já bloqueadas',

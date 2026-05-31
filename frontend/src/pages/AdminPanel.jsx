@@ -85,6 +85,7 @@ export default function AdminPanel() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [invitationsList, setInvitationsList] = useState([])
   const [inviting, setInviting] = useState(false)
+  const [hiddenRegistrationLink, setHiddenRegistrationLink] = useState(null)
 
   // UI status
   const [error, setError] = useState('')
@@ -137,6 +138,10 @@ export default function AdminPanel() {
         // Load invitations list
         const invitesRes = await axios.get('/api/admin/invitations')
         setInvitationsList(invitesRes.data)
+
+        // Load hidden registration link
+        const regLinkRes = await axios.get('/api/admin/registration-link')
+        setHiddenRegistrationLink(regLinkRes.data)
       }
       
       // Load pending sync diffs
@@ -521,6 +526,37 @@ export default function AdminPanel() {
       await refreshInvitations()
     } catch (err) {
       setError(err.response?.data?.detail || 'Erro ao excluir convite.')
+    }
+  }
+
+  const getHiddenRegistrationUrl = () => {
+    if (!hiddenRegistrationLink?.path) return ''
+    return `${window.location.origin}${hiddenRegistrationLink.path}`
+  }
+
+  const handleCopyHiddenRegistrationLink = async () => {
+    const link = getHiddenRegistrationUrl()
+    if (!link) return
+
+    try {
+      await navigator.clipboard.writeText(link)
+      showSuccess('Link de cadastro copiado.')
+    } catch (err) {
+      setError('Não foi possível copiar o link automaticamente.')
+    }
+  }
+
+  const handleRotateHiddenRegistrationLink = async () => {
+    if (!window.confirm('Gerar um novo link oculto? O link atual deixará de funcionar.')) return
+
+    setError('')
+    setSuccess('')
+    try {
+      const res = await axios.post('/api/admin/registration-link/rotate')
+      setHiddenRegistrationLink(res.data)
+      showSuccess('Novo link oculto de cadastro gerado.')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao gerar novo link oculto.')
     }
   }
 
@@ -1088,12 +1124,20 @@ export default function AdminPanel() {
                       </Select>
                     </TableCell>
                     <TableCell align="center">
-                      <Switch
-                        checked={u.is_active}
-                        disabled={u.id === user.id}
-                        color="success"
-                        onChange={() => handleToggleUserActive(u.id, u.is_active)}
-                      />
+                      <Stack spacing={0.5} alignItems="center">
+                        <Switch
+                          checked={u.is_active}
+                          disabled={u.id === user.id}
+                          color="success"
+                          onChange={() => handleToggleUserActive(u.id, u.is_active)}
+                        />
+                        <Chip
+                          label={u.is_active ? 'Ativo' : 'Pendente/Inativo'}
+                          color={u.is_active ? 'success' : 'warning'}
+                          size="small"
+                          variant={u.is_active ? 'filled' : 'outlined'}
+                        />
+                      </Stack>
                     </TableCell>
                     <TableCell align="center">
                       {new Date(u.created_at).toLocaleDateString('pt-BR')}
@@ -1351,6 +1395,45 @@ export default function AdminPanel() {
 
       {tabIndex === 7 && user?.role === 'system_admin' && (
         <Stack spacing={3}>
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
+                    Link oculto para cadastro com aprovação
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Cadastros feitos por este link entram desativados e precisam ser aprovados em Usuários & Acessos.
+                  </Typography>
+                </Box>
+                <TextField
+                  label="Link oculto"
+                  value={getHiddenRegistrationUrl()}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                  sx={{ '& input': { fontSize: '0.85rem' } }}
+                />
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <Button
+                    variant="contained"
+                    onClick={handleCopyHiddenRegistrationLink}
+                    disabled={!hiddenRegistrationLink}
+                  >
+                    Copiar Link
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    onClick={handleRotateHiddenRegistrationLink}
+                    disabled={!hiddenRegistrationLink}
+                  >
+                    Gerar Novo Link
+                  </Button>
+                </Stack>
+              </Stack>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardContent sx={{ p: 4 }}>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>

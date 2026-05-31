@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from ..db import get_db
-from ..models import User, AuditLog, SystemInvitation
+from ..models import User, AuditLog, SystemInvitation, SystemSetting
 from ..schemas import UserCreate, UserResponse, UserUpdate, Token
 from ..auth import get_password_hash, verify_password, create_access_token, get_current_active_user
 import uuid
@@ -46,8 +46,25 @@ def check_invitation(code: str, db: Session = Depends(get_db)):
         
     return {"valid": True, "email": invitation.email}
 
+@router.get("/registration-link/check")
+def check_registration_link(code: str, db: Session = Depends(get_db)):
+    if not code:
+        return {"valid": False, "detail": "Código não fornecido."}
+
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "hidden_registration_code").first()
+    if not setting or setting.value != code:
+        return {"valid": False, "detail": "Link de cadastro inválido."}
+
+    return {"valid": True}
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate, request: Request, invite_code: str = None, db: Session = Depends(get_db)):
+def register(
+    user_in: UserCreate,
+    request: Request,
+    invite_code: str = None,
+    registration_code: str = None,
+    db: Session = Depends(get_db)
+):
     if not check_rate_limit(request.client.host if request.client else "unknown"):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -73,25 +90,35 @@ def register(user_in: UserCreate, request: Request, invite_code: str = None, db:
     
     # Enforce invitation check if user_count > 0 (bootstrap admin is exempted)
     invitation = None
+    requires_admin_approval = False
     if user_count > 0:
-        if not invite_code:
+        if invite_code:
+            invitation = db.query(SystemInvitation).filter(
+                SystemInvitation.code == invite_code,
+                SystemInvitation.is_used == False
+            ).first()
+            if not invitation:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Código de convite inválido ou já utilizado."
+                )
+            if invitation.email.strip().lower() != user_in.email.strip().lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="O e-mail informado não corresponde ao e-mail deste convite."
+                )
+        elif registration_code:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == "hidden_registration_code").first()
+            if not setting or setting.value != registration_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Link de cadastro inválido."
+                )
+            requires_admin_approval = True
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Um código de convite válido é necessário para se cadastrar."
-            )
-        invitation = db.query(SystemInvitation).filter(
-            SystemInvitation.code == invite_code,
-            SystemInvitation.is_used == False
-        ).first()
-        if not invitation:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Código de convite inválido ou já utilizado."
-            )
-        if invitation.email.strip().lower() != user_in.email.strip().lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="O e-mail informado não corresponde ao e-mail deste convite."
             )
 
     role = "system_admin" if user_count == 0 else "participant"
@@ -106,7 +133,7 @@ def register(user_in: UserCreate, request: Request, invite_code: str = None, db:
         hashed_password=hashed_pwd,
         role=role,
         notification_preferences={"email": True, "in_app": True},
-        is_active=True
+        is_active=not requires_admin_approval
     )
     
     db.add(new_user)
@@ -125,7 +152,11 @@ def register(user_in: UserCreate, request: Request, invite_code: str = None, db:
         action="user_register",
         target_type="user",
         target_id=str(new_user.id),
-        new_value={"username": new_user.username, "role": new_user.role}
+        new_value={
+            "username": new_user.username,
+            "role": new_user.role,
+            "requires_admin_approval": requires_admin_approval
+        }
     )
     db.add(audit)
     db.commit()
@@ -150,7 +181,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Esta conta foi desativada pelo administrador."
+            detail="Esta conta está inativa ou aguardando aprovação do administrador."
         )
 
     access_token = create_access_token(data={"sub": user.username, "role": user.role})

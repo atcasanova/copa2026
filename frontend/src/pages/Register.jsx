@@ -6,7 +6,8 @@ import axios from 'axios'
 export default function Register() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [inviteCode, setInviteCode] = useState(searchParams.get('code') || '')
+  const [inviteCode] = useState(searchParams.get('code') || '')
+  const [registrationCode] = useState(searchParams.get('access') || '')
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -20,8 +21,22 @@ export default function Register() {
 
   useEffect(() => {
     const checkInvite = async () => {
+      if (registrationCode) {
+        try {
+          const res = await axios.get(`/api/auth/registration-link/check?code=${encodeURIComponent(registrationCode)}`)
+          if (!res.data.valid) {
+            setInviteError(res.data.detail || 'Link de cadastro inválido.')
+          }
+        } catch (err) {
+          setInviteError('Não foi possível validar este link de cadastro.')
+        } finally {
+          setCheckingInvite(false)
+        }
+        return
+      }
+
       if (!inviteCode) {
-        setInviteError('O cadastro é permitido apenas por convite. Use o link recebido por e-mail.')
+        setInviteError('O cadastro é permitido apenas por convite ou link autorizado.')
         setCheckingInvite(false)
         return
       }
@@ -41,14 +56,14 @@ export default function Register() {
     }
 
     checkInvite()
-  }, [inviteCode])
+  }, [inviteCode, registrationCode])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
 
-    if (inviteError || !inviteCode) {
-      setError('Use um link de convite válido para concluir o cadastro.')
+    if (inviteError || (!inviteCode && !registrationCode)) {
+      setError('Use um link válido para concluir o cadastro.')
       return
     }
 
@@ -65,16 +80,21 @@ export default function Register() {
     setLoading(true)
 
     try {
-      await axios.post(`/api/auth/register?invite_code=${encodeURIComponent(inviteCode)}`, {
+      const queryParam = inviteCode
+        ? `invite_code=${encodeURIComponent(inviteCode)}`
+        : `registration_code=${encodeURIComponent(registrationCode)}`
+      await axios.post(`/api/auth/register?${queryParam}`, {
         username: username.trim(),
         email: email.trim(),
         display_name: displayName.trim(),
         password
       })
       setSuccess(true)
-      setTimeout(() => {
-        navigate('/login')
-      }, 2500)
+      if (inviteCode) {
+        setTimeout(() => {
+          navigate('/login')
+        }, 2500)
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Erro ao realizar cadastro. Tente outro nome de usuário ou e-mail.')
     } finally {
@@ -102,7 +122,7 @@ export default function Register() {
                 Criar Nova Conta
               </Typography>
               <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
-                Complete seu cadastro usando o convite recebido por e-mail.
+              {registrationCode ? 'Complete seu cadastro. Seu acesso será liberado após aprovação.' : 'Complete seu cadastro usando o convite recebido por e-mail.'}
               </Typography>
             </Box>
 
@@ -126,7 +146,7 @@ export default function Register() {
 
             {success && (
               <Alert severity="success" sx={{ width: '100%', borderRadius: 2 }}>
-                Cadastro realizado com sucesso! Redirecionando para login...
+                Cadastro realizado com sucesso! {registrationCode ? 'Aguarde a aprovação do administrador para acessar.' : 'Redirecionando para login...'}
               </Alert>
             )}
 
@@ -159,9 +179,10 @@ export default function Register() {
                   variant="outlined"
                   fullWidth
                   required
-                  disabled
+                  disabled={!registrationCode}
                   value={email}
-                  placeholder="E-mail vinculado ao convite"
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={registrationCode ? 'seu@email.com' : 'E-mail vinculado ao convite'}
                 />
                 <TextField
                   label="Senha"

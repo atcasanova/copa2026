@@ -5,10 +5,11 @@ from uuid import UUID
 from datetime import datetime
 import io
 import csv
+import secrets
 from fastapi.responses import StreamingResponse
 
 from ..db import get_db
-from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation
+from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting
 from ..schemas import (
     MatchResponse, StageMultiplierResponse, StageMultiplierUpdate, MultiplierHistoryResponse,
     AnnouncementCreate, AnnouncementResponse, UserResponse, AuditLogResponse, SyncLogResponse, SyncMatchDiffResponse,
@@ -27,6 +28,20 @@ def sanitize_csv_value(val) -> str:
     if val_str and val_str[0] in ('=', '+', '-', '@', '\t', '\r'):
         return "'" + val_str
     return val_str
+
+def get_or_create_hidden_registration_setting(db: Session) -> SystemSetting:
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "hidden_registration_code").first()
+    if setting:
+        return setting
+
+    setting = SystemSetting(
+        key="hidden_registration_code",
+        value=secrets.token_urlsafe(32)
+    )
+    db.add(setting)
+    db.commit()
+    db.refresh(setting)
+    return setting
 
 router = APIRouter(prefix="/api/admin", tags=["Administration"])
 
@@ -832,6 +847,46 @@ def list_system_invitations(
     current_user: User = Depends(require_system_admin)
 ):
     return db.query(SystemInvitation).order_by(SystemInvitation.created_at.desc()).all()
+
+@router.get("/registration-link")
+def get_hidden_registration_link(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    setting = get_or_create_hidden_registration_setting(db)
+    return {
+        "code": setting.value,
+        "path": f"/register?access={setting.value}",
+        "updated_at": setting.updated_at
+    }
+
+@router.post("/registration-link/rotate")
+def rotate_hidden_registration_link(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    setting = get_or_create_hidden_registration_setting(db)
+    old_code = setting.value
+    setting.value = secrets.token_urlsafe(32)
+    setting.updated_at = datetime.utcnow()
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="hidden_registration_link_rotate",
+        target_type="system_setting",
+        target_id="hidden_registration_code",
+        old_value={"code_prefix": old_code[:8]},
+        new_value={"code_prefix": setting.value[:8]}
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(setting)
+
+    return {
+        "code": setting.value,
+        "path": f"/register?access={setting.value}",
+        "updated_at": setting.updated_at
+    }
 
 @router.post("/invitations/{invitation_id}/resend", response_model=SystemInvitationResponse)
 def resend_system_invitation(
