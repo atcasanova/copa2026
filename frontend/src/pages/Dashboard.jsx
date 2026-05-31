@@ -101,17 +101,11 @@ export default function Dashboard() {
     loadDashboardData()
   }, [])
 
-  const handleQuickPredictSave = async (matchId) => {
-    const pred = predGoals[matchId]
-    if (!pred || pred.goals_team1 === undefined || pred.goals_team2 === undefined || pred.goals_team1 === '' || pred.goals_team2 === '') {
-      alert("Por favor, preencha os gols de ambos os times.")
-      return
-    }
-
+  const executeQuickPredictSave = async (matchId, goals1, goals2) => {
     try {
       await axios.post(`/api/predictions/save?match_id=${matchId}`, {
-        goals_team1: parseInt(pred.goals_team1),
-        goals_team2: parseInt(pred.goals_team2)
+        goals_team1: parseInt(goals1),
+        goals_team2: parseInt(goals2)
       })
       
       // Set saved state indicator
@@ -128,19 +122,38 @@ export default function Dashboard() {
       const missingRes = await axios.get('/api/predictions/missing')
       setMissingPredictions(missingRes.data)
     } catch (err) {
-      alert(err.response?.data?.detail || "Erro ao salvar palpite.")
+      console.error("Erro ao salvar palpite rápido:", err)
     }
+  }
+
+  const handleQuickPredictSave = async (matchId) => {
+    const pred = predGoals[matchId]
+    if (!pred || pred.goals_team1 === undefined || pred.goals_team2 === undefined || pred.goals_team1 === '' || pred.goals_team2 === '') {
+      alert("Por favor, preencha os gols de ambos os times.")
+      return
+    }
+    await executeQuickPredictSave(matchId, pred.goals_team1, pred.goals_team2)
   }
 
   const handleInputChange = (matchId, teamField, val) => {
     if (val !== '' && !/^\d+$/.test(val)) return // Only numbers
+    
+    const currentPred = predGoals[matchId] || {}
+    const updatedPred = {
+      ...currentPred,
+      [teamField]: val
+    }
+
     setPredGoals(prev => ({
       ...prev,
-      [matchId]: {
-        ...prev[matchId],
-        [teamField]: val
-      }
+      [matchId]: updatedPred
     }))
+
+    // Auto-save if both fields are filled (not empty)
+    if (updatedPred.goals_team1 !== undefined && updatedPred.goals_team2 !== undefined &&
+        updatedPred.goals_team1 !== '' && updatedPred.goals_team2 !== '') {
+      executeQuickPredictSave(matchId, updatedPred.goals_team1, updatedPred.goals_team2)
+    }
   }
 
   const handleInviteResponse = async (inviteId, accept) => {

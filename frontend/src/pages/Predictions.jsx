@@ -177,17 +177,26 @@ export default function Predictions() {
       return
     }
 
-    setPredictions(prev => {
-      const current = prev[matchId] || { match_id: matchId }
-      return {
-        ...prev,
-        [matchId]: {
-          ...current,
-          [field]: value
-        }
+    const currentPred = predictions[matchId] || {}
+    const updatedPred = {
+      ...currentPred,
+      [field]: value
+    }
+
+    setPredictions(prev => ({
+      ...prev,
+      [matchId]: {
+        ...prev[matchId],
+        [field]: value
       }
-    })
+    }))
     setSaveStates(prev => ({ ...prev, [matchId]: 'unsaved' }))
+
+    // Trigger auto-save if both fields are filled (not empty)
+    if (updatedPred.goals_team1 !== undefined && updatedPred.goals_team2 !== undefined &&
+        updatedPred.goals_team1 !== '' && updatedPred.goals_team2 !== '') {
+      handleAutoSave(matchId, updatedPred.goals_team1, updatedPred.goals_team2, updatedPred.qualified_team_name)
+    }
   }
 
   const isLocked = (kickoffTimeIso) => {
