@@ -163,7 +163,7 @@ export default function Rankings() {
       )}
 
       {/* Standings Table */}
-      <TableContainer component={Paper} sx={{ borderRadius: 3, overflow: 'hidden' }}>
+      <TableContainer component={Paper} sx={{ borderRadius: 3, overflowX: 'auto' }}>
         <Table>
           <TableHead>
             <TableRow>

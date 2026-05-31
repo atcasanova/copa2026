@@ -283,9 +283,9 @@ export default function Dashboard() {
                       </Box>
 
                       {/* Score Input Row */}
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, flexGrow: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 1, sm: 2 }, flexGrow: 1, width: '100%' }}>
                         {/* Team A */}
-                        <Typography variant="body1" sx={{ fontWeight: 700, minWidth: { xs: 80, sm: 120 }, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
+                        <Typography variant="body1" sx={{ fontWeight: 700, minWidth: { xs: 65, sm: 120 }, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
                           {getFlagUrl(match.team1?.flag_icon) ? (
                             <img src={getFlagUrl(match.team1.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
                           ) : (
@@ -302,23 +302,25 @@ export default function Dashboard() {
                         {/* Input 1 */}
                         <TextField
                           size="small"
-                          inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', width: 40 } }}
+                          sx={{ width: 50 }}
+                          inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem' } }}
                           value={predGoals[match.id]?.goals_team1 ?? ''}
                           onChange={(e) => handleInputChange(match.id, 'goals_team1', e.target.value)}
                         />
 
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>x</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>x</Typography>
 
                         {/* Input 2 */}
                         <TextField
                           size="small"
-                          inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem', width: 40 } }}
+                          sx={{ width: 50 }}
+                          inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem' } }}
                           value={predGoals[match.id]?.goals_team2 ?? ''}
                           onChange={(e) => handleInputChange(match.id, 'goals_team2', e.target.value)}
                         />
 
                         {/* Team B */}
-                        <Typography variant="body1" sx={{ fontWeight: 700, minWidth: { xs: 80, sm: 120 }, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 1 }}>
+                        <Typography variant="body1" sx={{ fontWeight: 700, minWidth: { xs: 65, sm: 120 }, textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 1 }}>
                           <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
                             {match.team2_name}
                           </Box>
