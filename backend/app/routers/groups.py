@@ -43,8 +43,7 @@ def check_group_admin(db: Session, group_id: UUID, user_id: UUID) -> bool:
     ).first()
     return membership is not None
 
-@router.post("/", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
-def create_group(
+def create_group_record(
     group_in: GroupCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -85,11 +84,10 @@ def create_group(
     )
     db.add(audit)
     db.commit()
-    
+	    
     return new_group
 
-@router.get("/", response_model=List[GroupResponse])
-def get_my_and_public_groups(
+def list_my_and_public_groups(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -102,6 +100,36 @@ def get_my_and_public_groups(
     return db.query(Group).filter(
         (Group.is_private == False) | (Group.id.in_(my_group_ids))
     ).all()
+
+@router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
+def create_group_without_trailing_slash(
+    group_in: GroupCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return create_group_record(group_in, db, current_user)
+
+@router.post("/", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
+def create_group(
+    group_in: GroupCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return create_group_record(group_in, db, current_user)
+
+@router.get("", response_model=List[GroupResponse], include_in_schema=False)
+def get_my_and_public_groups_without_trailing_slash(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return list_my_and_public_groups(db, current_user)
+
+@router.get("/", response_model=List[GroupResponse])
+def get_my_and_public_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return list_my_and_public_groups(db, current_user)
 
 @router.get("/{group_id}", response_model=GroupResponse)
 def get_group_details(

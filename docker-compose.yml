@@ -10,13 +10,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       PGTZ: America/Sao_Paulo
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      mailnet:
-        ipv4_address: 172.25.0.11
+      - internal_net
 
   backend:
     build:
@@ -25,11 +22,13 @@ services:
     container_name: bolao_backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Expõe apenas para localhost (seguro, a internet não acessa diretamente)
+      - "127.0.0.1:3998:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - ENABLE_ADMIN_BOOTSTRAP=${ENABLE_ADMIN_BOOTSTRAP:-false}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
       - ADMIN_BOOTSTRAP_USERNAME=${ADMIN_BOOTSTRAP_USERNAME}
       - ADMIN_BOOTSTRAP_EMAIL=${ADMIN_BOOTSTRAP_EMAIL}
@@ -45,14 +44,14 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - FROM_DOMAIN=${FROM_DOMAIN}
       - SMTP_FROM=${SMTP_FROM}
-      - FRONTEND_URL=http://localhost:3000
+      - FRONTEND_URL=https://copa2026.bru.to
     depends_on:
       - db
     volumes:
       - ./backend:/app
     networks:
-      mailnet:
-        ipv4_address: 172.25.0.12
+      - internal_net
+      - mailnet      # Apenas backend se conecta à rede de e-mails
 
   frontend:
     build:
@@ -61,22 +60,24 @@ services:
     container_name: bolao_frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Expõe apenas para localhost (seguro, a internet não acessa diretamente)
+      - "127.0.0.1:3999:3000"
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=/
     depends_on:
       - backend
     volumes:
       - ./frontend:/app
       - /app/node_modules
     networks:
-      mailnet:
-        ipv4_address: 172.25.0.13
+      - internal_net
 
 volumes:
   postgres_data:
 
 networks:
+  internal_net:
+    driver: bridge
   mailnet:
     external: true
     name: megasena_default

@@ -3,7 +3,7 @@ import {
   Box, Card, CardContent, Typography, Tabs, Tab, Grid, TextField, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   MenuItem, Select, FormControl, InputLabel, Switch, Alert, Snackbar, Stack,
-  Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions
+  Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link
 } from '@mui/material'
 import {
   ExpandMore as ExpandIcon,
@@ -152,7 +152,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     loadInitialData()
-  }, [tabIndex])
+  }, [])
 
   // Save success message alert
   const showSuccess = (msg) => {
@@ -442,6 +442,25 @@ export default function AdminPanel() {
     }
   }
 
+  const handleViewPaymentProof = async (userId) => {
+    const proofWindow = window.open('', '_blank', 'noopener')
+    try {
+      const response = await axios.get(`/api/payments/proof/${userId}`, {
+        responseType: 'blob'
+      })
+      const url = window.URL.createObjectURL(response.data)
+      if (proofWindow) {
+        proofWindow.location = url
+      } else {
+        window.open(url, '_blank', 'noopener')
+      }
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+    } catch (err) {
+      if (proofWindow) proofWindow.close()
+      setError(err.response?.data?.detail || 'Erro ao abrir comprovante.')
+    }
+  }
+
   const filteredMatches = matches.filter(m => {
     if (filterStage !== 'All' && m.stage !== filterStage) return false
     return true
@@ -471,6 +490,37 @@ export default function AdminPanel() {
       setError(err.response?.data?.detail || 'Erro ao enviar convite.')
     } finally {
       setInviting(false)
+    }
+  }
+
+  const refreshInvitations = async () => {
+    const res = await axios.get('/api/admin/invitations')
+    setInvitationsList(res.data)
+  }
+
+  const handleResendInvitation = async (invitation) => {
+    setError('')
+    setSuccess('')
+    try {
+      await axios.post(`/api/admin/invitations/${invitation.id}/resend`)
+      showSuccess(`Convite reenviado para ${invitation.email}.`)
+      await refreshInvitations()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao reenviar convite.')
+    }
+  }
+
+  const handleDeleteInvitation = async (invitation) => {
+    if (!window.confirm(`Excluir o convite de ${invitation.email}?`)) return
+
+    setError('')
+    setSuccess('')
+    try {
+      await axios.delete(`/api/admin/invitations/${invitation.id}`)
+      showSuccess(`Convite de ${invitation.email} excluído.`)
+      await refreshInvitations()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao excluir convite.')
     }
   }
 
@@ -1255,9 +1305,14 @@ export default function AdminPanel() {
                         </TableCell>
                         <TableCell align="center">
                           {u.payment_proof_filename ? (
-                            <Link href={`${axios.defaults.baseURL || ''}/api/payments/proof/${u.id}`} target="_blank" rel="noopener" sx={{ fontSize: '0.85rem' }}>
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => handleViewPaymentProof(u.id)}
+                              sx={{ fontSize: '0.85rem', textTransform: 'none' }}
+                            >
                               Ver Comprovante
-                            </Link>
+                            </Button>
                           ) : (
                             <Typography variant="caption" color="text.secondary">Não enviado</Typography>
                           )}
@@ -1299,7 +1354,7 @@ export default function AdminPanel() {
           <Card>
             <CardContent sx={{ p: 4 }}>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
-                ✉️ Enviar Novo Convite de Cadastro
+	                ✉️ Enviar Novo Convite de Cadastro
               </Typography>
               <Box component="form" onSubmit={handleSendInvitation} sx={{ display: 'flex', gap: 2, alignItems: 'center', maxWidth: 600 }}>
                 <TextField
@@ -1337,30 +1392,60 @@ export default function AdminPanel() {
                 <TableContainer component={Paper} sx={{ borderRadius: 3, border: '1px solid #1f2937' }}>
                   <Table>
                     <TableHead sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 'bold' }}>E-mail</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Código</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Criado em</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Usado em</TableCell>
-                      </TableRow>
+	                      <TableRow>
+	                        <TableCell sx={{ fontWeight: 'bold' }}>E-mail</TableCell>
+	                        <TableCell sx={{ fontWeight: 'bold' }}>Link único</TableCell>
+	                        <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+	                        <TableCell sx={{ fontWeight: 'bold' }}>Criado em</TableCell>
+	                        <TableCell sx={{ fontWeight: 'bold' }}>Usado em</TableCell>
+	                        <TableCell sx={{ fontWeight: 'bold' }} align="center">Ações</TableCell>
+	                      </TableRow>
                     </TableHead>
                     <TableBody>
                       {invitationsList.map((inv) => (
                         <TableRow key={inv.id} hover>
-                          <TableCell>{inv.email}</TableCell>
-                          <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{inv.code}</TableCell>
-                          <TableCell>
-                            {inv.is_used ? (
-                              <Chip label="Usado" color="success" size="small" sx={{ fontWeight: 600 }} />
+	                          <TableCell>{inv.email}</TableCell>
+	                          <TableCell>
+	                            <Link
+	                              href={`${window.location.origin}/register?code=${inv.code}`}
+	                              target="_blank"
+	                              rel="noopener"
+	                              sx={{ fontSize: '0.85rem', wordBreak: 'break-all' }}
+	                            >
+	                              {`${window.location.origin}/register?code=${inv.code}`}
+	                            </Link>
+	                          </TableCell>
+	                          <TableCell>
+	                            {inv.is_used ? (
+	                              <Chip label="Usado" color="success" size="small" sx={{ fontWeight: 600 }} />
                             ) : (
                               <Chip label="Pendente" color="warning" size="small" sx={{ fontWeight: 600 }} />
                             )}
-                          </TableCell>
-                          <TableCell>{new Date(inv.created_at).toLocaleString()}</TableCell>
-                          <TableCell>{inv.used_at ? new Date(inv.used_at).toLocaleString() : '-'}</TableCell>
-                        </TableRow>
-                      ))}
+	                          </TableCell>
+	                          <TableCell>{new Date(inv.created_at).toLocaleString()}</TableCell>
+	                          <TableCell>{inv.used_at ? new Date(inv.used_at).toLocaleString() : '-'}</TableCell>
+	                          <TableCell align="center">
+	                            <Stack direction="row" spacing={1} justifyContent="center">
+	                              <Button
+	                                size="small"
+	                                variant="outlined"
+	                                disabled={inv.is_used}
+	                                onClick={() => handleResendInvitation(inv)}
+	                              >
+	                                Reenviar
+	                              </Button>
+	                              <Button
+	                                size="small"
+	                                variant="outlined"
+	                                color="error"
+	                                onClick={() => handleDeleteInvitation(inv)}
+	                              >
+	                                Excluir
+	                              </Button>
+	                            </Stack>
+	                          </TableCell>
+	                        </TableRow>
+	                      ))}
                     </TableBody>
                   </Table>
                 </TableContainer>

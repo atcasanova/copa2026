@@ -10,8 +10,7 @@ from ..auth import get_current_active_user
 
 router = APIRouter(prefix="/api/announcements", tags=["Announcements"])
 
-@router.get("/", response_model=List[AnnouncementResponse])
-def get_announcements(
+def list_announcements(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -53,8 +52,22 @@ def get_announcements(
         item = AnnouncementResponse.model_validate(ann)
         item.is_read = ann.id in read_announcement_ids
         response_data.append(item)
-        
+	        
     return response_data
+
+@router.get("", response_model=List[AnnouncementResponse], include_in_schema=False)
+def get_announcements_without_trailing_slash(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return list_announcements(db, current_user)
+
+@router.get("/", response_model=List[AnnouncementResponse])
+def get_announcements(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return list_announcements(db, current_user)
 
 @router.post("/{announcement_id}/read", status_code=status.HTTP_200_OK)
 def mark_as_read(

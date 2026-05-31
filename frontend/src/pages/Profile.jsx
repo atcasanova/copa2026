@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import { Box, Card, CardContent, Grid, TextField, Button, Typography, FormControlLabel, Checkbox, Stack, Avatar, Alert, Snackbar, CircularProgress, Link, Divider } from '@mui/material'
+import { Box, Card, CardContent, Grid, TextField, Button, Typography, FormControlLabel, Checkbox, Stack, Alert, Snackbar, CircularProgress, Divider } from '@mui/material'
 import { ContentCopy as CopyIcon, CheckCircle as ApprovedIcon, HourglassEmpty as PendingIcon, Cancel as RejectedIcon, UploadFile as UploadIcon } from '@mui/icons-material'
 import { useAuth } from '../App'
 import axios from 'axios'
 
 export default function Profile() {
-  const { user, refreshUser } = useAuth()
+  const { user, token, loading: authLoading, refreshUser } = useAuth()
   
   const [displayName, setDisplayName] = useState(user?.display_name || '')
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || '')
   const [emailNotif, setEmailNotif] = useState(user?.notification_preferences?.email ?? true)
   const [inAppNotif, setInAppNotif] = useState(user?.notification_preferences?.in_app ?? true)
   
@@ -34,13 +33,23 @@ export default function Profile() {
   const [loadingPix, setLoadingPix] = useState(true)
 
   const loadPixData = async () => {
+    if (authLoading) return
+    if (!token) {
+      setLoadingPix(false)
+      return
+    }
+
     try {
       setLoadingPix(true)
-      const configRes = await axios.get('/api/payments/config')
+      const authHeaders = { Authorization: `Bearer ${token}` }
+      const configRes = await axios.get('/api/payments/config', { headers: authHeaders })
       setPixConfig(configRes.data)
       
       if (configRes.data && configRes.data.pix_key) {
-        const qrRes = await axios.get('/api/payments/qrcode', { responseType: 'blob' })
+        const qrRes = await axios.get('/api/payments/qrcode', {
+          headers: authHeaders,
+          responseType: 'blob'
+        })
         const url = URL.createObjectURL(qrRes.data)
         setQrBlobUrl(url)
       }
@@ -53,7 +62,7 @@ export default function Profile() {
 
   useEffect(() => {
     loadPixData()
-  }, [])
+  }, [authLoading, token])
 
   const handleCopyCopiaCola = () => {
     if (pixConfig?.copia_e_cola) {
@@ -108,6 +117,28 @@ export default function Profile() {
     }
   }
 
+  const handleViewMyProof = async () => {
+    if (!token) return
+
+    const proofWindow = window.open('', '_blank', 'noopener')
+    try {
+      const response = await axios.get('/api/payments/proof/me', {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      })
+      const url = window.URL.createObjectURL(response.data)
+      if (proofWindow) {
+        proofWindow.location = url
+      } else {
+        window.open(url, '_blank', 'noopener')
+      }
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+    } catch (err) {
+      if (proofWindow) proofWindow.close()
+      setUploadError(err.response?.data?.detail || 'Erro ao abrir comprovante.')
+    }
+  }
+
   const handleUpdateProfile = async (e) => {
     e.preventDefault()
     setProfileError('')
@@ -116,7 +147,6 @@ export default function Profile() {
     try {
       await axios.put('/api/auth/me', {
         display_name: displayName,
-        avatar_url: avatarUrl || null,
         notification_preferences: {
           email: emailNotif,
           in_app: inAppNotif
@@ -185,24 +215,6 @@ export default function Profile() {
 
               <Box component="form" onSubmit={handleUpdateProfile}>
                 <Stack spacing={3}>
-                  <Box display="flex" alignItems="center" gap={3}>
-                    <Avatar 
-                      src={avatarUrl || ''} 
-                      alt={displayName} 
-                      sx={{ width: 80, height: 80, bgcolor: 'secondary.main', color: 'secondary.contrastText', fontSize: '2rem', fontWeight: 'bold' }}
-                    >
-                      {displayName.charAt(0).toUpperCase()}
-                    </Avatar>
-                    <TextField
-                      label="URL do Avatar (opcional)"
-                      variant="outlined"
-                      fullWidth
-                      value={avatarUrl}
-                      onChange={(e) => setAvatarUrl(e.target.value)}
-                      placeholder="https://exemplo.com/avatar.jpg"
-                    />
-                  </Box>
-
                   <TextField
                     label="Nome de usuário (Username)"
                     variant="outlined"
@@ -454,9 +466,14 @@ export default function Profile() {
                               <Typography variant="body2" color="warning.main" sx={{ fontWeight: 600 }}>
                                 📁 Arquivo enviado com sucesso e sob análise.
                               </Typography>
-                              <Link href="/api/payments/proof/me" target="_blank" rel="noopener" sx={{ display: 'inline-block', mt: 1, fontSize: '0.85rem' }}>
+                              <Button
+                                size="small"
+                                variant="text"
+                                onClick={handleViewMyProof}
+                                sx={{ mt: 1, textTransform: 'none' }}
+                              >
                                 Visualizar comprovante enviado
-                              </Link>
+                              </Button>
                             </Box>
                           )
                         )}

@@ -694,6 +694,13 @@ def export_audit_logs_csv(
 # 8. Invitation Management (System Admin Only)
 # ==========================================
 
+def get_invitation_link(code: str) -> str:
+    import os
+
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return f"{base_url}/register?code={code}"
+
+
 def send_invitation_email(email: str, code: str) -> bool:
     import os
     import smtplib
@@ -715,19 +722,17 @@ def send_invitation_email(email: str, code: str) -> bool:
     message["From"] = sender_email
     message["To"] = recipient_email
     
-    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    register_link = f"{base_url}/register?code={code}"
+    register_link = get_invitation_link(code)
     
-    text = f"Olá!\n\nVocê foi convidado para participar do Bolão Copa do Mundo 2026.\nUse o código abaixo para se cadastrar:\n\n{code}\n\nOu acesse diretamente pelo link: {register_link}\n\nBoa sorte!"
+    text = f"Olá!\n\nVocê foi convidado para participar do Bolão Copa 2026.\nSeu cadastro deve ser feito pelo link único abaixo:\n\n{register_link}\n\nEste convite é pessoal e vinculado ao seu e-mail.\n\nBoa sorte!"
     html = f"""\
     <html>
       <body>
         <h2>Você foi convidado!</h2>
-        <p>Você foi convidado para participar do <strong>Bolão Copa do Mundo 2026</strong>.</p>
-        <p>Use o código de convite abaixo na tela de cadastro:</p>
-        <p style="font-size: 1.25rem; font-weight: bold; background: #f3f4f6; padding: 10px; display: inline-block; border-radius: 5px;">{code}</p>
-        <p>Ou clique no link a seguir para se registrar diretamente:</p>
+        <p>Você foi convidado para participar do <strong>Bolão Copa 2026</strong>.</p>
+        <p>Use o link único abaixo para concluir seu cadastro. O convite é pessoal e vinculado ao seu e-mail.</p>
         <p><a href="{register_link}" style="background: #10b981; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Cadastrar no Bolão</a></p>
+        <p style="font-size: 0.875rem; color: #4b5563;">Se o botão não funcionar, copie e cole este endereço no navegador:<br>{register_link}</p>
         <p>Boa sorte!</p>
       </body>
     </html>
@@ -827,3 +832,52 @@ def list_system_invitations(
     current_user: User = Depends(require_system_admin)
 ):
     return db.query(SystemInvitation).order_by(SystemInvitation.created_at.desc()).all()
+
+@router.post("/invitations/{invitation_id}/resend", response_model=SystemInvitationResponse)
+def resend_system_invitation(
+    invitation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    invitation = db.query(SystemInvitation).filter(SystemInvitation.id == invitation_id).first()
+    if not invitation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Convite não encontrado.")
+    if invitation.is_used:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Convites já utilizados não podem ser reenviados.")
+
+    sent = send_invitation_email(invitation.email, invitation.code)
+    if not sent:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Não foi possível enviar o e-mail do convite.")
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="invitation_resend",
+        target_type="invitation",
+        target_id=str(invitation.id),
+        new_value={"email": invitation.email}
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(invitation)
+    return invitation
+
+@router.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_system_invitation(
+    invitation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    invitation = db.query(SystemInvitation).filter(SystemInvitation.id == invitation_id).first()
+    if not invitation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Convite não encontrado.")
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="invitation_delete",
+        target_type="invitation",
+        target_id=str(invitation.id),
+        old_value={"email": invitation.email, "is_used": invitation.is_used}
+    )
+    db.add(audit)
+    db.delete(invitation)
+    db.commit()

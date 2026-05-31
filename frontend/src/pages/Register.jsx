@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { Box, Card, CardContent, TextField, Button, Typography, Link, Alert, Stack } from '@mui/material'
 import axios from 'axios'
@@ -13,12 +13,44 @@ export default function Register() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
+  const [inviteError, setInviteError] = useState('')
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [checkingInvite, setCheckingInvite] = useState(true)
+
+  useEffect(() => {
+    const checkInvite = async () => {
+      if (!inviteCode) {
+        setInviteError('O cadastro é permitido apenas por convite. Use o link recebido por e-mail.')
+        setCheckingInvite(false)
+        return
+      }
+
+      try {
+        const res = await axios.get(`/api/auth/invitations/check?code=${encodeURIComponent(inviteCode)}`)
+        if (!res.data.valid) {
+          setInviteError(res.data.detail || 'Convite inválido ou já utilizado.')
+          return
+        }
+        setEmail(res.data.email || '')
+      } catch (err) {
+        setInviteError('Não foi possível validar este convite.')
+      } finally {
+        setCheckingInvite(false)
+      }
+    }
+
+    checkInvite()
+  }, [inviteCode])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+
+    if (inviteError || !inviteCode) {
+      setError('Use um link de convite válido para concluir o cadastro.')
+      return
+    }
 
     // Basic password validation
     if (password.length < 6) {
@@ -70,9 +102,21 @@ export default function Register() {
                 Criar Nova Conta
               </Typography>
               <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
-                Registre-se e crie ou participe de grupos com seus amigos!
+                Complete seu cadastro usando o convite recebido por e-mail.
               </Typography>
             </Box>
+
+            {checkingInvite && (
+              <Alert severity="info" sx={{ width: '100%', borderRadius: 2 }}>
+                Validando convite...
+              </Alert>
+            )}
+
+            {inviteError && (
+              <Alert severity="warning" sx={{ width: '100%', borderRadius: 2 }}>
+                {inviteError}
+              </Alert>
+            )}
 
             {error && (
               <Alert severity="error" sx={{ width: '100%', borderRadius: 2 }}>
@@ -86,18 +130,9 @@ export default function Register() {
               </Alert>
             )}
 
+            {!inviteError && (
             <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
               <Stack spacing={2}>
-                <TextField
-                  label="Código de Convite"
-                  variant="outlined"
-                  fullWidth
-                  required
-                  disabled={success}
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  placeholder="Insira o código de convite recebido"
-                />
                 <TextField
                   label="Nome de usuário (Username)"
                   variant="outlined"
@@ -124,10 +159,9 @@ export default function Register() {
                   variant="outlined"
                   fullWidth
                   required
-                  disabled={success}
+                  disabled
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="joao@email.com"
+                  placeholder="E-mail vinculado ao convite"
                 />
                 <TextField
                   label="Senha"
@@ -156,13 +190,14 @@ export default function Register() {
                   color="primary"
                   size="large"
                   fullWidth
-                  disabled={loading || success}
+                  disabled={loading || success || checkingInvite}
                   sx={{ py: 1.5, mt: 1, fontSize: '1rem', fontWeight: 'bold' }}
                 >
                   {loading ? 'Cadastrando...' : 'Cadastrar'}
                 </Button>
               </Stack>
             </Box>
+            )}
 
             <Typography variant="body2" color="text.secondary" align="center">
               Já possui uma conta?{' '}

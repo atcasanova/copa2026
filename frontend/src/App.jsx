@@ -122,11 +122,13 @@ export default function App() {
   const setToken = (newToken) => {
     if (newToken) {
       localStorage.setItem('token', newToken)
+      setLoading(true)
       setTokenState(newToken)
     } else {
       localStorage.removeItem('token')
       setTokenState(null)
       setUser(null)
+      setLoading(false)
     }
   }
 
@@ -142,6 +144,7 @@ export default function App() {
         setLoading(false)
         return
       }
+      setLoading(true)
       try {
         const res = await axios.get('/api/auth/me', {
           headers: { Authorization: `Bearer ${token}` }

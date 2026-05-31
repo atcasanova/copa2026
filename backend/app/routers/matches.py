@@ -9,8 +9,7 @@ from ..auth import get_current_active_user
 
 router = APIRouter(prefix="/api/matches", tags=["Matches"])
 
-@router.get("/", response_model=List[MatchResponse])
-def get_matches(
+def list_matches(
     date: Optional[str] = None,
     stage: Optional[str] = None,
     group_name: Optional[str] = None,
@@ -43,6 +42,32 @@ def get_matches(
         
     # Sort matches by kickoff time
     return query.order_by(Match.kickoff_time.asc()).all()
+
+@router.get("", response_model=List[MatchResponse], include_in_schema=False)
+def get_matches_without_trailing_slash(
+    date: Optional[str] = None,
+    stage: Optional[str] = None,
+    group_name: Optional[str] = None,
+    team: Optional[str] = None,
+    ground: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    return list_matches(date, stage, group_name, team, ground, status, db, current_user)
+
+@router.get("/", response_model=List[MatchResponse])
+def get_matches(
+    date: Optional[str] = None,
+    stage: Optional[str] = None,
+    group_name: Optional[str] = None,
+    team: Optional[str] = None,
+    ground: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    return list_matches(date, stage, group_name, team, ground, status, db, current_user)
 
 @router.get("/{match_id}", response_model=MatchResponse)
 def get_match_detail(

@@ -1,16 +1,22 @@
-import React, { useState } from 'react'
-import { useNavigate, Link as RouterLink } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Box, Card, CardContent, TextField, Button, Typography, Link, Alert, Stack } from '@mui/material'
 import axios from 'axios'
 import { useAuth } from '../App'
 
 export default function Login() {
-  const { setToken } = useAuth()
+  const { setToken, user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate('/', { replace: true })
+    }
+  }, [authLoading, user, navigate])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -27,7 +33,7 @@ export default function Login() {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       })
       setToken(res.data.access_token)
-      navigate('/')
+      navigate('/', { replace: true })
     } catch (err) {
       setError(err.response?.data?.detail || 'Falha ao autenticar. Verifique seus dados.')
     } finally {
@@ -55,7 +61,7 @@ export default function Login() {
             </Typography>
             <Box textAlign="center">
               <Typography variant="h4" component="h1" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'primary.main' }}>
-                Futebol Pool 2026
+                Bolão Copa 2026
               </Typography>
               <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
                 Faça o login para palpitar na Copa do Mundo
@@ -119,10 +125,7 @@ export default function Login() {
             </Box>
 
             <Typography variant="body2" color="text.secondary" align="center">
-              Ainda não tem conta?{' '}
-              <Link component={RouterLink} to="/register" color="primary.main" sx={{ fontWeight: 600, textDecoration: 'none' }}>
-                Cadastre-se aqui
-              </Link>
+              O cadastro é feito somente por convite enviado por e-mail.
             </Typography>
           </Stack>
         </CardContent>
