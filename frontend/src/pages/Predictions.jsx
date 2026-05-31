@@ -362,7 +362,7 @@ export default function Predictions() {
 
       {/* Pagination Tabs Bar */}
       {totalPages > 0 && (
-        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 4, width: '100%', overflow: 'hidden' }}>
           <Tabs 
             value={safePageIndex} 
             onChange={(e, val) => setCurrentPageIndex(val)} 

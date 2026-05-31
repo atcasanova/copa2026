@@ -48,44 +48,48 @@ export default function Dashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true)
-      // 1. Fetch user standing stats & groups
-      const statsRes = await axios.get('/api/rankings/me')
-      setStats(statsRes.data)
-      
-      // 2. Fetch pending invites
-      const inviteRes = await axios.get('/api/groups/invitations/pending')
-      setPendingInvites(inviteRes.data)
-      
-      // 3. Fetch locking soon
-      const soonRes = await axios.get('/api/predictions/locking-soon?hours=48')
-      setLockingSoon(soonRes.data)
-      
-      // 4. Fetch missing predictions
-      const missingRes = await axios.get('/api/predictions/missing')
-      setMissingPredictions(missingRes.data)
-      
-      // 5. Fetch upcoming matches (unlocked matches in future)
-      const matchesRes = await axios.get('/api/matches')
-      const now = new Date()
-      // Filter scheduled matches in the future
-      const future = matchesRes.data.filter(m => {
-        const kickoff = new Date(m.kickoff_time)
-        // 3 hours offset lock
-        const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000)
-        return m.status === 'scheduled' && now < lockTime
-      })
-      setUpcomingMatches(future.slice(0, 4)) // Take top 4
-      
-      // Prepopulate input fields if user already has predictions (from upcoming matches)
-      const myPredsRes = await axios.get('/api/predictions/my-predictions')
-      const predsMap = {}
-      myPredsRes.data.forEach(p => {
-        predsMap[p.match_id] = {
-          goals_team1: p.goals_team1,
-          goals_team2: p.goals_team2
-        }
-      })
-      setPredGoals(predsMap)
+      await Promise.all([
+        axios.get('/api/rankings/me')
+          .then(res => setStats(res.data))
+          .catch(err => console.error('Erro ao carregar estatísticas:', err)),
+        
+        axios.get('/api/groups/invitations/pending')
+          .then(res => setPendingInvites(res.data))
+          .catch(err => console.error('Erro ao carregar convites pendentes:', err)),
+        
+        axios.get('/api/predictions/locking-soon?hours=48')
+          .then(res => setLockingSoon(res.data))
+          .catch(err => console.error('Erro ao carregar jogos bloqueando em breve:', err)),
+        
+        axios.get('/api/predictions/missing')
+          .then(res => setMissingPredictions(res.data))
+          .catch(err => console.error('Erro ao carregar palpites faltantes:', err)),
+        
+        axios.get('/api/matches')
+          .then(res => {
+            const now = new Date()
+            const future = res.data.filter(m => {
+              const kickoff = new Date(m.kickoff_time)
+              const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000)
+              return m.status === 'scheduled' && now < lockTime
+            })
+            setUpcomingMatches(future.slice(0, 4))
+          })
+          .catch(err => console.error('Erro ao carregar próximas partidas:', err)),
+        
+        axios.get('/api/predictions/my-predictions')
+          .then(res => {
+            const predsMap = {}
+            res.data.forEach(p => {
+              predsMap[p.match_id] = {
+                goals_team1: p.goals_team1,
+                goals_team2: p.goals_team2
+              }
+            })
+            setPredGoals(predsMap)
+          })
+          .catch(err => console.error('Erro ao carregar meus palpites:', err))
+      ])
     } catch (err) {
       console.error('Erro ao carregar dados do dashboard:', err)
     } finally {

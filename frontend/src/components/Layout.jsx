@@ -210,6 +210,7 @@ export default function Layout() {
           flexGrow: 1,
           p: { xs: 2, sm: 3 },
           width: { md: `calc(100% - ${drawerWidth}px)` },
+          minWidth: 0, // Prevents flex children from stretching the layout on mobile
           mt: '64px', // Space for Toolbar
           color: 'text.primary',
         }}
