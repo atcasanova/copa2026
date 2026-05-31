@@ -65,10 +65,12 @@ export default function Dashboard() {
   const [savedPreds, setSavedPreds] = useState({})
   
   const [loading, setLoading] = useState(true)
-
   const loadDashboardData = async () => {
     try {
       setLoading(true)
+      const settingsRes = await axios.get('/api/predictions/settings').catch(() => ({ data: { prediction_lock_hours: 3 } }))
+      const lockHours = settingsRes.data.prediction_lock_hours ?? 3
+
       await Promise.all([
         axios.get('/api/rankings/me')
           .then(res => setStats(res.data))
@@ -89,11 +91,11 @@ export default function Dashboard() {
         axios.get('/api/matches')
           .then(res => {
             const now = new Date()
-            const future = res.data.filter(m => {
-              const kickoff = new Date(m.kickoff_time)
-              const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000)
-              return m.status === 'scheduled' && now < lockTime
-            })
+	            const future = res.data.filter(m => {
+	              const kickoff = new Date(m.kickoff_time)
+	              const lockTime = new Date(kickoff.getTime() - lockHours * 60 * 60 * 1000)
+	              return m.status === 'scheduled' && now < lockTime
+	            })
             setUpcomingMatches(future.slice(0, 4))
           })
           .catch(err => console.error('Erro ao carregar próximas partidas:', err)),

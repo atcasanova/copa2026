@@ -66,6 +66,7 @@ export default function Predictions() {
   const [saveStates, setSaveStates] = useState({}) // match_id -> 'saved' | 'saving' | 'error' | 'unsaved'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [predictionLockHours, setPredictionLockHours] = useState(3)
 
   const autoSelectPage = (loadedMatches, mode) => {
     if (!loadedMatches || loadedMatches.length === 0) return;
@@ -124,6 +125,9 @@ export default function Predictions() {
     try {
       setLoading(true)
       
+      const settingsRes = await axios.get('/api/predictions/settings')
+      setPredictionLockHours(settingsRes.data.prediction_lock_hours ?? 3)
+
       // Load matches
       const matchesRes = await axios.get('/api/matches')
       const loadedMatches = matchesRes.data;
@@ -223,14 +227,14 @@ export default function Predictions() {
   const isLocked = (kickoffTimeIso) => {
     const now = new Date()
     const kickoff = new Date(kickoffTimeIso)
-    const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000) // 3 hours before
+    const lockTime = new Date(kickoff.getTime() - predictionLockHours * 60 * 60 * 1000)
     return now >= lockTime
   }
 
   const isLockingSoon = (kickoffTimeIso) => {
     const now = new Date()
     const kickoff = new Date(kickoffTimeIso)
-    const lockTime = new Date(kickoff.getTime() - 3 * 60 * 60 * 1000)
+    const lockTime = new Date(kickoff.getTime() - predictionLockHours * 60 * 60 * 1000)
     const warningTime = new Date(now.getTime() + 24 * 60 * 60 * 1000) // 24 hours warning
     return now < lockTime && lockTime <= warningTime
   }

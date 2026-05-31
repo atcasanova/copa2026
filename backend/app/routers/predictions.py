@@ -7,18 +7,23 @@ from ..db import get_db
 from ..models import Prediction, Match, User, AuditLog
 from ..schemas import PredictionCreate, PredictionResponse, PredictionBulkUpdate, MatchResponse
 from ..auth import get_current_active_user
+from ..settings import get_prediction_lock_hours, get_locked_match_cutoff, is_match_locked_for_predictions
 from uuid import UUID
 
 router = APIRouter(prefix="/api/predictions", tags=["Predictions"])
 
-def check_match_locked(match: Match) -> bool:
+def check_match_locked(db: Session, match: Match) -> bool:
     """
-    Returns True if match is locked (kickoff time is less than 3 hours away).
+    Returns True if match is inside the configured prediction lock window.
     """
-    # Current time in UTC (FastAPI runs in UTC internally)
-    now_utc = datetime.utcnow()
-    lock_threshold = match.kickoff_time - timedelta(hours=3)
-    return now_utc >= lock_threshold
+    return is_match_locked_for_predictions(db, match)
+
+@router.get("/settings")
+def get_prediction_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    return {"prediction_lock_hours": get_prediction_lock_hours(db)}
 
 @router.get("/my-predictions", response_model=List[PredictionResponse])
 def get_my_predictions(
@@ -73,10 +78,11 @@ def save_prediction(
             )
 
     # Enforce lock validation
-    if check_match_locked(match):
+    if check_match_locked(db, match):
+        lock_hours = get_prediction_lock_hours(db)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Aposta bloqueada: apostas devem ser feitas até 3 horas antes do início da partida."
+            detail=f"Aposta bloqueada: apostas devem ser feitas até {lock_hours} hora(s) antes do início da partida."
         )
 
     # Check if prediction already exists
@@ -164,7 +170,7 @@ def bulk_save_predictions(
         # Skip locked matches silently in bulk save, or raise error.
         # It's better to raise an error if any is locked to prevent front-end state mismatch,
         # or skip locked ones. Let's raise error for transparency.
-        if check_match_locked(match):
+        if check_match_locked(db, match):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Não foi possível salvar: A partida {match.team1_name} x {match.team2_name} já está bloqueada para palpites."
@@ -220,9 +226,7 @@ def get_missing_predictions(
     """
     Get matches that current user has NOT predicted yet and that are NOT locked yet.
     """
-    now_utc = datetime.utcnow()
-    # Match kickoff_time must be > now_utc + 3 hours to be open for predictions
-    open_threshold = now_utc + timedelta(hours=3)
+    open_threshold = get_locked_match_cutoff(db)
     
     # Matches that are not locked
     open_matches = db.query(Match).filter(Match.kickoff_time > open_threshold).all()
@@ -242,9 +246,8 @@ def get_matches_locking_soon(
     """
     Get matches that will lock in the next N hours, where the user has NOT placed a prediction.
     """
-    now_utc = datetime.utcnow()
-    lock_time_start = now_utc + timedelta(hours=3)
-    lock_time_end = now_utc + timedelta(hours=3 + hours)
+    lock_time_start = get_locked_match_cutoff(db)
+    lock_time_end = lock_time_start + timedelta(hours=hours)
     
     # Matches locking soon
     soon_matches = db.query(Match).filter(
@@ -266,7 +269,7 @@ def get_predictions_for_user(
 ):
     """
     Get predictions for another user.
-    Security rule: Only show predictions for matches that are already LOCKED (kickoff time - 3h in past).
+    Security rule: Only show predictions for matches that are already locked by the configured prediction window.
     Predictions for upcoming/unlocked matches are strictly hidden.
     """
     now_utc = datetime.utcnow()
@@ -281,9 +284,7 @@ def get_predictions_for_user(
                                      
     filtered_predictions = []
     for pred in predictions:
-        # Check if match is locked (current time >= kickoff_time - 3h)
-        lock_threshold = pred.match.kickoff_time - timedelta(hours=3)
-        if now_utc >= lock_threshold:
+        if is_match_locked_for_predictions(db, pred.match, now_utc):
             filtered_predictions.append(pred)
             
     return filtered_predictions

@@ -17,20 +17,29 @@ import axios from 'axios'
 export default function Rules() {
   const [summary, setSummary] = useState(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
+  const [predictionLockHours, setPredictionLockHours] = useState(3)
 
   useEffect(() => {
-    const fetchSummary = async () => {
+    const fetchData = async () => {
       try {
-        const res = await axios.get('/api/payments/summary')
-        setSummary(res.data)
+        const [summaryRes, settingsRes] = await Promise.all([
+          axios.get('/api/payments/summary'),
+          axios.get('/api/predictions/settings').catch(() => ({ data: { prediction_lock_hours: 3 } }))
+        ])
+        setSummary(summaryRes.data)
+        setPredictionLockHours(settingsRes.data.prediction_lock_hours ?? 3)
       } catch (err) {
         console.error("Erro ao carregar dados do rateio:", err)
       } finally {
         setLoadingSummary(false)
       }
     }
-    fetchSummary()
+    fetchData()
   }, [])
+
+  const formatLockHours = (hours) => {
+    return Number(hours) === 1 ? '1 hora' : `${hours} horas`
+  }
 
   return (
     <Box sx={{ mt: 1 }}>
@@ -51,10 +60,9 @@ export default function Rules() {
                 <Divider sx={{ mb: 2 }} />
                 <Typography variant="body2" sx={{ lineHeight: 1.7 }} color="text.secondary">
                   O bloqueio para registro ou edição de palpites de qualquer partida ocorre rigorosamente{' '}
-                  <strong style={{ color: '#fff' }}>3 horas antes do horário de início oficial (kickoff)</strong> do jogo.
+                  <strong style={{ color: '#fff' }}>{formatLockHours(predictionLockHours)} antes do horário de início oficial (kickoff)</strong> do jogo.
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1.5, lineHeight: 1.7 }} color="text.secondary">
-                  💡 <em>Exemplo:</em> Se um jogo está marcado para às 16:00, o palpite deve ser salvo até às 13:00 do mesmo dia.
                   Após o bloqueio, os palpites de todos os participantes tornam-se públicos, garantindo total transparência ao bolão.
                 </Typography>
               </CardContent>

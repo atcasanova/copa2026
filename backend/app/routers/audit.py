@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import hashlib
 
@@ -9,6 +9,7 @@ from ..db import get_db
 from ..models import AuditBlock, Match, Prediction
 from ..schemas import AuditBlockResponse
 from ..auth import get_current_active_user
+from ..settings import get_locked_match_cutoff, is_match_locked_for_predictions
 
 router = APIRouter(prefix="/api/audit", tags=["Cryptographic Audit"])
 
@@ -27,10 +28,8 @@ def get_or_create_audit_block(db: Session, match_id: int) -> AuditBlock:
     if not match:
         return None
 
-    # Check if match is locked (kickoff is <= now + 3 hours)
     now_utc = datetime.utcnow()
-    lock_threshold = match.kickoff_time - timedelta(hours=3)
-    if now_utc < lock_threshold:
+    if not is_match_locked_for_predictions(db, match, now_utc):
         return None  # Cannot generate block for an active/unlocked match
 
     # Find previous locked match in the deterministic chain
@@ -92,7 +91,7 @@ def get_all_audit_blocks(
     Triggers block creation on-the-fly for any matches that have locked but do not have an audit block yet.
     """
     now_utc = datetime.utcnow()
-    lock_threshold = now_utc + timedelta(hours=3)
+    lock_threshold = get_locked_match_cutoff(db, now_utc)
 
     # Fetch all matches that are currently locked, ordered by chain order
     locked_matches = db.query(Match).filter(

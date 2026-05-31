@@ -55,6 +55,8 @@ export default function AdminPanel() {
   const [selectedMultStage, setSelectedMultStage] = useState('')
   const [newMultValue, setNewMultValue] = useState('')
   const [multReason, setMultReason] = useState('')
+  const [predictionLockHours, setPredictionLockHours] = useState('3')
+  const [predictionLockMaxHours, setPredictionLockMaxHours] = useState(168)
 
   // 3. Announcements State
   const [annTitle, setAnnTitle] = useState('')
@@ -111,6 +113,11 @@ export default function AdminPanel() {
         // Load multiplier history
         const histRes = await axios.get('/api/admin/multipliers/history')
         setMultHistory(histRes.data)
+
+        // Load prediction lock setting
+        const lockRes = await axios.get('/api/admin/settings/prediction-lock-hours')
+        setPredictionLockHours(String(lockRes.data.hours))
+        setPredictionLockMaxHours(lockRes.data.max_hours || 168)
 
         // Load groups (for announcement targets)
         const groupsRes = await axios.get('/api/groups')
@@ -313,6 +320,25 @@ export default function AdminPanel() {
       showSuccess('Recálculo de todas as apostas executado!')
     } catch (err) {
       alert('Erro ao forçar recálculo.')
+    }
+  }
+
+  const handleUpdatePredictionLockHours = async (e) => {
+    e.preventDefault()
+    const hours = Number(predictionLockHours)
+    if (!Number.isInteger(hours) || hours < 0 || hours > predictionLockMaxHours) {
+      alert(`Informe um número inteiro de horas entre 0 e ${predictionLockMaxHours}.`)
+      return
+    }
+
+    try {
+      const res = await axios.put(`/api/admin/settings/prediction-lock-hours?hours=${hours}`)
+      setPredictionLockHours(String(res.data.hours))
+      setPredictionLockMaxHours(res.data.max_hours || predictionLockMaxHours)
+      showSuccess('Janela de bloqueio dos palpites atualizada com sucesso!')
+      loadInitialData()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Erro ao salvar a janela de bloqueio.')
     }
   }
 
@@ -944,10 +970,39 @@ export default function AdminPanel() {
                 </CardContent>
               </Card>
             </Grid>
-          </Grid>
+	          </Grid>
 
-          {/* Audit History of Multipliers */}
-          <Card>
+	          <Card>
+	            <CardContent sx={{ p: 4 }}>
+	              <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
+	                ⏱️ Bloqueio de Palpites
+	              </Typography>
+	              <Box component="form" onSubmit={handleUpdatePredictionLockHours}>
+	                <Grid container spacing={2} alignItems="center">
+	                  <Grid item xs={12} sm={6} md={4}>
+	                    <TextField
+	                      label="Horas antes do jogo"
+	                      type="number"
+	                      size="small"
+	                      fullWidth
+	                      required
+	                      value={predictionLockHours}
+	                      onChange={(e) => setPredictionLockHours(e.target.value)}
+	                      inputProps={{ min: 0, max: predictionLockMaxHours, step: 1 }}
+	                    />
+	                  </Grid>
+	                  <Grid item xs={12} sm={6} md={3}>
+	                    <Button type="submit" variant="contained" color="primary" startIcon={<SaveIcon />} fullWidth>
+	                      Salvar
+	                    </Button>
+	                  </Grid>
+	                </Grid>
+	              </Box>
+	            </CardContent>
+	          </Card>
+
+	          {/* Audit History of Multipliers */}
+	          <Card>
             <CardContent sx={{ p: 4 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
                 📜 Histórico de Alterações de Multiplicador

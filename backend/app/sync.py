@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .models import Team, Stadium, Match, SyncLog, SyncMatchDiff, AuditLog
 from .db import SessionLocal
 from .scoring import recalculate_match_predictions, map_round_to_stage
+from .settings import is_match_locked_for_predictions
 
 TEAMS_URL = os.getenv("TEAMS_JSON_URL", "https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.teams.json")
 STADIUMS_URL = os.getenv("STADIUMS_JSON_URL", "https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.stadiums.json")
@@ -432,7 +433,7 @@ def sync_openfootball_data(db: Session, force_sync: bool = False) -> tuple[str, 
                 
                 # Check if this change requires manual review
                 now_utc = datetime.utcnow()
-                is_locked = match.kickoff_time <= now_utc + timedelta(hours=3)
+                is_locked = is_match_locked_for_predictions(db, match, now_utc)
                 
                 score_changed = (
                     prev_val["score_ft_team1"] != new_val["score_ft_team1"] or

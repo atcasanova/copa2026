@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models import Announcement, Group, GroupMember, PasswordResetToken, User
+from app.models import Announcement, Group, GroupMember, Match, PasswordResetToken, Stadium, Team, User
 from app.auth import verify_password
 
 
@@ -135,3 +135,49 @@ def test_password_reset_flow(client, db_session, test_users, monkeypatch):
 
     new_login = client.post("/api/auth/login", data={"username": "p1_user", "password": "new-password"})
     assert new_login.status_code == 200
+
+
+def test_admin_can_change_prediction_lock_hours(client, db_session, test_users):
+    admin = test_users[0]
+    participant = test_users[2]
+
+    db_session.add_all([
+        Team(name="Brasil", group_name="A"),
+        Team(name="Canada", group_name="A"),
+        Stadium(name="Stadium Lock", city="City", timezone="UTC")
+    ])
+    db_session.commit()
+
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="18:00 UTC+0",
+        kickoff_time=datetime.utcnow() + timedelta(hours=2),
+        team1_name="Brasil",
+        team2_name="Canada",
+        ground="Stadium Lock",
+        status="scheduled"
+    )
+    db_session.add(match)
+    db_session.commit()
+
+    participant_headers = login_headers(client, participant.username)
+    blocked = client.post(
+        f"/api/predictions/save?match_id={match.id}",
+        headers=participant_headers,
+        json={"goals_team1": 1, "goals_team2": 0}
+    )
+    assert blocked.status_code == 400
+
+    admin_headers = login_headers(client, admin.username)
+    update = client.put("/api/admin/settings/prediction-lock-hours?hours=1", headers=admin_headers)
+    assert update.status_code == 200
+    assert update.json()["hours"] == 1
+
+    allowed = client.post(
+        f"/api/predictions/save?match_id={match.id}",
+        headers=participant_headers,
+        json={"goals_team1": 1, "goals_team2": 0}
+    )
+    assert allowed.status_code == 200

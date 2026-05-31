@@ -16,8 +16,9 @@ from ..schemas import (
     SystemInvitationCreate, SystemInvitationResponse
 )
 from ..auth import require_system_admin, require_score_admin, require_participant
-from ..scoring import recalculate_match_predictions, recalculate_all_predictions_and_rankings, get_rankings, DEFAULT_MULTIPLIERS
+from ..scoring import recalculate_match_predictions, recalculate_all_predictions_and_rankings, get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache
 from ..sync import seed_initial_data, sync_openfootball_data
+from ..settings import get_prediction_lock_hours, set_prediction_lock_hours, MAX_PREDICTION_LOCK_HOURS
 
 def sanitize_csv_value(val) -> str:
     if val is None:
@@ -315,6 +316,44 @@ def reject_sync_diff(
 # ==========================================
 # 3. Scoring Configuration (System Admin Only)
 # ==========================================
+
+@router.get("/settings/prediction-lock-hours")
+def get_prediction_lock_setting(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    return {
+        "hours": get_prediction_lock_hours(db),
+        "max_hours": MAX_PREDICTION_LOCK_HOURS
+    }
+
+@router.put("/settings/prediction-lock-hours")
+def update_prediction_lock_setting(
+    hours: int = Query(..., ge=0, le=MAX_PREDICTION_LOCK_HOURS),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    old_hours = get_prediction_lock_hours(db)
+    setting = set_prediction_lock_hours(db, hours)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="prediction_lock_hours_change",
+        target_type="system_setting",
+        target_id=setting.key,
+        old_value={"hours": old_hours},
+        new_value={"hours": hours}
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(setting)
+    invalidate_ranking_cache(db)
+
+    return {
+        "hours": hours,
+        "max_hours": MAX_PREDICTION_LOCK_HOURS,
+        "updated_at": setting.updated_at
+    }
 
 @router.get("/multipliers", response_model=List[StageMultiplierResponse])
 def get_multipliers(

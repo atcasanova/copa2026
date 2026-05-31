@@ -2,7 +2,8 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from .models import Match, Prediction, User, StageMultiplier, AuditLog, RankingCache
-from datetime import datetime, timedelta
+from datetime import datetime
+from .settings import get_locked_match_cutoff
 
 # Default multipliers as positive floats
 DEFAULT_MULTIPLIERS = {
@@ -234,11 +235,9 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
     6. earliest registration date;
     7. alphabetical display name order.
     """
-    # 1. Fetch locked/finished matches count
-    # A match is locked if current time is >= kickoff_time - 3 hours.
-    # We will compute the locking threshold.
+    # 1. Fetch locked/finished matches count.
     # Note: internal timestamps are in UTC.
-    lock_threshold = datetime.utcnow() + timedelta(hours=3)
+    lock_threshold = get_locked_match_cutoff(db)
     
     # Query finished or locked matches count for missing predictions tracking
     locked_matches_query = db.query(Match).filter(Match.kickoff_time <= lock_threshold)

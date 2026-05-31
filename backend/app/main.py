@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 import logging
 
 from .db import engine, Base, SessionLocal
-from .models import User, StageMultiplier, PixConfig
+from .models import User, StageMultiplier, PixConfig, SystemSetting
 from .auth import get_password_hash
+from .settings import DEFAULT_PREDICTION_LOCK_HOURS, PREDICTION_LOCK_HOURS_KEY
 from .routers import auth, matches, predictions, rankings, groups, announcements, admin, audit, payments
 from .sync import seed_initial_data
 from .scheduler import start_scheduler
@@ -81,6 +82,12 @@ def on_startup():
             logger.info("Criando registro inicial de configuração do Pix...")
             default_pix = PixConfig(id=1, entry_fee=0.0)
             db.add(default_pix)
+            db.commit()
+
+        lock_setting = db.query(SystemSetting).filter(SystemSetting.key == PREDICTION_LOCK_HOURS_KEY).first()
+        if not lock_setting:
+            logger.info("Criando configuração padrão de bloqueio de palpites...")
+            db.add(SystemSetting(key=PREDICTION_LOCK_HOURS_KEY, value=str(DEFAULT_PREDICTION_LOCK_HOURS)))
             db.commit()
     except Exception as e:
         logger.error(f"Erro ao inicializar dados/colunas de pagamento: {str(e)}")

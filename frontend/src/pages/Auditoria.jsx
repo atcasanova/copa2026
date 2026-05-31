@@ -41,6 +41,7 @@ export default function Auditoria() {
   const [blocks, setBlocks] = useState([])
   const [selectedBlock, setSelectedBlock] = useState(null)
   const [blockDetails, setBlockDetails] = useState(null)
+  const [predictionLockHours, setPredictionLockHours] = useState(3)
   
   const [loadingList, setLoadingList] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
@@ -55,12 +56,16 @@ export default function Auditoria() {
     try {
       setLoadingList(true)
       setError('')
-      const res = await axios.get('/api/audit/blocks')
-      setBlocks(res.data)
+      const [blocksRes, settingsRes] = await Promise.all([
+        axios.get('/api/audit/blocks'),
+        axios.get('/api/predictions/settings').catch(() => ({ data: { prediction_lock_hours: 3 } }))
+      ])
+      setBlocks(blocksRes.data)
+      setPredictionLockHours(settingsRes.data.prediction_lock_hours ?? 3)
       
       // Auto-select first block if present
-      if (res.data.length > 0) {
-        handleSelectBlock(res.data[0])
+      if (blocksRes.data.length > 0) {
+        handleSelectBlock(blocksRes.data[0])
       }
     } catch (err) {
       setError('Erro ao carregar a cadeia de auditoria. Verifique sua conexão.')
@@ -170,6 +175,15 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
     return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
   }
 
+  const formatLockHours = (hours) => {
+    return Number(hours) === 1 ? '1 hora' : `${hours} horas`
+  }
+
+  const getLockDate = (kickoffTimeIso) => {
+    if (!kickoffTimeIso) return null
+    return new Date(new Date(kickoffTimeIso).getTime() - predictionLockHours * 60 * 60 * 1000)
+  }
+
   return (
     <Box sx={{ mt: 1 }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 3 }}>
@@ -185,7 +199,7 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
             <SecurityIcon /> Como funciona a transparência do Bolão?
           </Typography>
           <Typography variant="body2" sx={{ lineHeight: 1.7, color: 'text.secondary', mb: 2 }}>
-            Para garantir que a administração do sistema <strong>não possa alterar ou adicionar palpites</strong> após o bloqueio de cada partida (que ocorre rigorosamente 3 horas antes do início), o sistema gera um <strong>bloco criptográfico de auditoria</strong>. 
+            Para garantir que a administração do sistema <strong>não possa alterar ou adicionar palpites</strong> após o bloqueio de cada partida (que ocorre rigorosamente {formatLockHours(predictionLockHours)} antes do início), o sistema gera um <strong>bloco criptográfico de auditoria</strong>.
             Este bloco agrupa todos os palpites recebidos de forma ordenada e gera um hash de verificação único (<code>SHA-256</code>) contendo o hash do jogo anterior. 
             Isso cria uma cadeia sequencial imutável (blockchain). Qualquer alteração em qualquer aposta de qualquer jogo invalidará toda a cadeia subsequente.
           </Typography>
@@ -399,7 +413,7 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
                           Hash Calculado (SHA-256): {calculatedHash}
                         </Typography>
                         <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-                          Isso prova criptograficamente que a lista de palpites abaixo é exatamente a mesma que existia no servidor às {formatDateTime(new Date(new Date(blockDetails.match?.kickoff_time).getTime() - 3*60*60*1000))} (3 horas antes do início). Nenhum palpite foi alterado.
+                          Isso prova criptograficamente que a lista de palpites abaixo é exatamente a mesma que existia no servidor às {formatDateTime(getLockDate(blockDetails.match?.kickoff_time))} ({formatLockHours(predictionLockHours)} antes do início). Nenhum palpite foi alterado.
                         </Typography>
                       </Alert>
                     ) : (

@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime, timezone, timedelta
 from ..db import get_db
 from ..models import Group, GroupMember, GroupInvitation, User, AuditLog, Match, Prediction
 from ..schemas import GroupCreate, GroupResponse, GroupDetailResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate
 from ..auth import get_current_active_user
+from ..settings import get_locked_match_cutoff
 import io
 import csv
 from fastapi.responses import StreamingResponse
@@ -593,7 +593,7 @@ def export_group_predictions_csv(
     """
     Exports predictions of group members.
     Group admins only.
-    Security rule: Only exports predictions for matches that are already LOCKED (kickoff time - 3h in past).
+    Security rule: Only exports predictions for matches that are already locked by the configured prediction window.
     """
     if not check_group_admin(db, group_id, current_user.id):
         raise HTTPException(status_code=403, detail="Apenas administradores do grupo podem exportar os palpites.")
@@ -605,7 +605,7 @@ def export_group_predictions_csv(
     ).all()]
     
     # Fetch locked matches
-    locked_threshold = datetime.utcnow() + timedelta(hours=3)
+    locked_threshold = get_locked_match_cutoff(db)
     locked_matches = db.query(Match).filter(
         Match.kickoff_time <= locked_threshold
     ).all()
