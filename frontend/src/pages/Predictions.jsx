@@ -16,6 +16,27 @@ import { useAuth } from '../App'
 
 const getFlagUrl = (emoji) => {
   if (!emoji || emoji === '🏳️') return null
+
+  // Handle exceptions for England and Scotland flags (subnational entities)
+  if (
+    emoji === '🏴󠁧󠁢󠁥󠁮󠁧󠁿' ||
+    emoji === '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}' ||
+    emoji === 'ENG' ||
+    emoji === 'England' ||
+    emoji === 'Inglaterra'
+  ) {
+    return 'https://flagcdn.com/w40/gb-eng.png'
+  }
+  if (
+    emoji === '🏴󠁧󠁢󠁳󠁣󠁴󠁿' ||
+    emoji === '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}' ||
+    emoji === 'SCO' ||
+    emoji === 'Scotland' ||
+    emoji === 'Escócia'
+  ) {
+    return 'https://flagcdn.com/w40/gb-sct.png'
+  }
+
   const codePoints = Array.from(emoji).map(char => char.codePointAt(0))
   if (codePoints.length >= 2 && codePoints[0] >= 127462 && codePoints[0] <= 127487) {
     const char1 = String.fromCharCode(codePoints[0] - 127397)
