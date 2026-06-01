@@ -5,9 +5,10 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from ..db import get_db
 from ..models import Prediction, Match, User, AuditLog
-from ..schemas import PredictionCreate, PredictionResponse, PredictionBulkUpdate, MatchResponse
+from ..schemas import PredictionCreate, PredictionResponse, PredictionBulkUpdate, MatchResponse, MatchPredictionVisibilityResponse
 from ..auth import get_current_active_user
 from ..settings import get_prediction_lock_hours, get_locked_match_cutoff, is_match_locked_for_predictions
+from ..scoring import DEFAULT_MULTIPLIERS, get_stage_multiplier
 from uuid import UUID
 
 router = APIRouter(prefix="/api/predictions", tags=["Predictions"])
@@ -23,7 +24,16 @@ def get_prediction_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    return {"prediction_lock_hours": get_prediction_lock_hours(db)}
+    return {
+        "prediction_lock_hours": get_prediction_lock_hours(db),
+        "multipliers": [
+            {
+                "stage": stage,
+                "multiplier": float(get_stage_multiplier(db, stage))
+            }
+            for stage in DEFAULT_MULTIPLIERS.keys()
+        ]
+    }
 
 @router.get("/my-predictions", response_model=List[PredictionResponse])
 def get_my_predictions(
@@ -260,6 +270,50 @@ def get_matches_locking_soon(
     
     locking_soon_missing = [m for m in soon_matches if m.id not in pred_match_ids]
     return locking_soon_missing
+
+@router.get("/match/{match_id}/visibility", response_model=MatchPredictionVisibilityResponse)
+def get_match_prediction_visibility(
+    match_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Before the match lock window, returns only who already predicted.
+    After lock, returns the submitted prediction scores.
+    """
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Partida não encontrada.")
+
+    locked = is_match_locked_for_predictions(db, match)
+    predictions = db.query(Prediction).join(User, User.id == Prediction.user_id).filter(
+        Prediction.match_id == match_id,
+        User.is_active == True
+    ).order_by(User.display_name.asc()).all()
+
+    entries = []
+    for pred in predictions:
+        entry = {
+            "user_id": pred.user_id,
+            "display_name": pred.user.display_name,
+            "avatar_url": pred.user.avatar_url,
+            "created_at": pred.created_at,
+            "goals_team1": None,
+            "goals_team2": None,
+            "qualified_team_name": None
+        }
+        if locked:
+            entry["goals_team1"] = pred.goals_team1
+            entry["goals_team2"] = pred.goals_team2
+            entry["qualified_team_name"] = pred.qualified_team_name
+        entries.append(entry)
+
+    return {
+        "match_id": match.id,
+        "is_locked": locked,
+        "total_predictions": len(entries),
+        "entries": entries
+    }
 
 @router.get("/user/{user_id}", response_model=List[PredictionResponse])
 def get_predictions_for_user(

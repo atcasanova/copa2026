@@ -186,8 +186,6 @@ export default function Rankings() {
                   </Tooltip>
                 </Box>
               </TableCell>
-              <TableCell align="center">Palpites Feitos</TableCell>
-              <TableCell align="center">Faltantes</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -205,13 +203,11 @@ export default function Rankings() {
                   <TableCell align="center"><Skeleton variant="text" /></TableCell>
                   <TableCell align="center"><Skeleton variant="text" /></TableCell>
                   <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
                 </TableRow>
               ))
             ) : rankingData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   Nenhum usuário classificado para esta visualização.
                 </TableCell>
               </TableRow>
@@ -276,6 +272,9 @@ export default function Rankings() {
                           <Typography sx={{ fontWeight: isMe ? 700 : 500 }}>
                             {row.display_name} {isMe && '(Você)'}
                           </Typography>
+                          <Tooltip title={`Desempates: ${row.exact_scores_count} placar(es) exato(s), ${row.correct_results_count} resultado(s) correto(s), ${row.knockout_points || 0} ponto(s) no mata-mata, ${row.missing_predictions_count} palpite(s) faltante(s) em jogos bloqueados. Palpites registrados: ${row.predictions_count}.`}>
+                            <HelpOutline sx={{ fontSize: '0.95rem', cursor: 'help', color: 'text.secondary' }} />
+                          </Tooltip>
                         </Box>
                       </Box>
                     </TableCell>
@@ -293,16 +292,6 @@ export default function Rankings() {
                     {/* Correct result count */}
                     <TableCell align="center">
                       {row.correct_results_count}
-                    </TableCell>
-
-                    {/* Predictions Made */}
-                    <TableCell align="center">
-                      {row.predictions_count}
-                    </TableCell>
-
-                    {/* Missing Count */}
-                    <TableCell align="center" sx={{ color: row.missing_predictions_count > 0 ? 'error.main' : 'text.secondary' }}>
-                      {row.missing_predictions_count}
                     </TableCell>
                   </TableRow>
                 )
@@ -323,7 +312,7 @@ export default function Rankings() {
             2. Maior número de palpites com placar exato (10 pontos); <br />
             3. Maior número de palpites com resultado correto (3, 4 ou 6 pontos); <br />
             4. Maior pontuação obtida na fase eliminatória (Mata-mata); <br />
-            5. Menor número de palpites perdidos/faltantes em jogos já bloqueados; <br />
+            5. Menor número de palpites faltantes em jogos já bloqueados; <br />
             6. Data/Hora de cadastro mais antiga no sistema; <br />
             7. Ordem alfabética do nome de exibição.
           </Typography>

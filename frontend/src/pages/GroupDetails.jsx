@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Box, Card, CardContent, Grid, Typography, Button, TextField, Divider, Alert, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Avatar, Stack,
-  Chip, List, ListItem, ListItemText, ListItemSecondaryAction, IconButton, Tooltip
+  Chip, List, ListItem, ListItemText, ListItemSecondaryAction, IconButton, Tooltip,
+  Autocomplete, CircularProgress
 } from '@mui/material'
 import {
   ContentCopy as CopyIcon,
@@ -30,6 +31,9 @@ export default function GroupDetails() {
   const [members, setMembers] = useState([])
   const [standings, setStandings] = useState([])
   const [inviteeIdent, setInviteeIdent] = useState('')
+  const [selectedInvitee, setSelectedInvitee] = useState(null)
+  const [inviteeOptions, setInviteeOptions] = useState([])
+  const [inviteeLoading, setInviteeLoading] = useState(false)
   
   // UI states
   const [loading, setLoading] = useState(true)
@@ -74,17 +78,40 @@ export default function GroupDetails() {
     e.preventDefault()
     setSuccessMsg('')
     setError('')
-    if (!inviteeIdent.trim()) return
+    const identifier = selectedInvitee?.username || inviteeIdent.trim()
+    if (!identifier) return
 
     try {
       await axios.post(`/api/groups/${groupId}/invite`, {
-        invitee_identifier: inviteeIdent.trim()
+        invitee_identifier: identifier
       })
-      setSuccessMsg('Convite enviado com sucesso!')
+      setSuccessMsg('Convite enviado com sucesso! O participante verá a solicitação para aceitar no painel inicial.')
       setInviteeIdent('')
+      setSelectedInvitee(null)
+      setInviteeOptions([])
       loadGroupDetails()
     } catch (err) {
       setError(err.response?.data?.detail || 'Não foi possível convidar o usuário.')
+    }
+  }
+
+  const handleInviteeSearch = async (value) => {
+    setInviteeIdent(value)
+    if (value.trim().length < 2) {
+      setInviteeOptions([])
+      return
+    }
+
+    try {
+      setInviteeLoading(true)
+      const res = await axios.get(`/api/groups/${groupId}/invite-candidates`, {
+        params: { q: value.trim() }
+      })
+      setInviteeOptions(res.data)
+    } catch (err) {
+      setInviteeOptions([])
+    } finally {
+      setInviteeLoading(false)
     }
   }
 
@@ -372,14 +399,73 @@ export default function GroupDetails() {
 
                   <Box component="form" onSubmit={handleSendInvite} sx={{ mb: 3 }}>
                     <Stack direction="row" spacing={1}>
-                      <TextField
-                        label="Username ou E-mail"
-                        variant="outlined"
-                        size="small"
-                        required
+                      <Autocomplete
+                        freeSolo
                         fullWidth
-                        value={inviteeIdent}
-                        onChange={(e) => setInviteeIdent(e.target.value)}
+                        size="small"
+                        options={inviteeOptions}
+                        loading={inviteeLoading}
+                        value={selectedInvitee}
+                        inputValue={inviteeIdent}
+                        onInputChange={(event, value, reason) => {
+                          if (reason === 'input') {
+                            setSelectedInvitee(null)
+                            handleInviteeSearch(value)
+                          } else if (reason === 'clear') {
+                            setSelectedInvitee(null)
+                            setInviteeIdent('')
+                            setInviteeOptions([])
+                          }
+                        }}
+                        onChange={(event, value) => {
+                          if (typeof value === 'string') {
+                            setSelectedInvitee(null)
+                            setInviteeIdent(value)
+                            return
+                          }
+                          setSelectedInvitee(value)
+                          setInviteeIdent(value ? `@${value.username}` : '')
+                        }}
+                        getOptionLabel={(option) => (
+                          typeof option === 'string'
+                            ? option
+                            : `${option.display_name} (@${option.username})`
+                        )}
+                        isOptionEqualToValue={(option, value) => option.id === value.id}
+                        filterOptions={(options) => options}
+                        renderOption={(props, option) => (
+                          <Box component="li" {...props} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                            <Avatar src={option.avatar_url || ''} sx={{ width: 28, height: 28 }}>
+                              {option.display_name.charAt(0).toUpperCase()}
+                            </Avatar>
+                            <Box>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                {option.display_name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                @{option.username}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            label="Nome ou username"
+                            variant="outlined"
+                            required
+                            InputProps={{
+                              ...params.InputProps,
+                              endAdornment: (
+                                <>
+                                  {inviteeLoading ? <CircularProgress color="inherit" size={18} /> : null}
+                                  {params.InputProps.endAdornment}
+                                </>
+                              )
+                            }}
+                          />
+                        )}
+                        noOptionsText={inviteeIdent.trim().length < 2 ? 'Digite ao menos 2 caracteres' : 'Nenhum participante encontrado'}
                       />
                       <Button type="submit" variant="contained" color="primary">
                         <SendIcon />

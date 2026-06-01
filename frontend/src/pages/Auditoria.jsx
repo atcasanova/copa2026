@@ -9,7 +9,8 @@ import {
   VerifiedUser as VerifyIcon,
   ArrowDownward as ArrowIcon,
   HelpOutline as InfoIcon,
-  Security as SecurityIcon
+  Security as SecurityIcon,
+  OpenInNew as OpenInNewIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 
@@ -42,6 +43,7 @@ export default function Auditoria() {
   const [selectedBlock, setSelectedBlock] = useState(null)
   const [blockDetails, setBlockDetails] = useState(null)
   const [predictionLockHours, setPredictionLockHours] = useState(3)
+  const [githubAudit, setGithubAudit] = useState(null)
   
   const [loadingList, setLoadingList] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
@@ -56,12 +58,14 @@ export default function Auditoria() {
     try {
       setLoadingList(true)
       setError('')
-      const [blocksRes, settingsRes] = await Promise.all([
+      const [blocksRes, settingsRes, githubAuditRes] = await Promise.all([
         axios.get('/api/audit/blocks'),
-        axios.get('/api/predictions/settings').catch(() => ({ data: { prediction_lock_hours: 3 } }))
+        axios.get('/api/predictions/settings').catch(() => ({ data: { prediction_lock_hours: 3 } })),
+        axios.get('/api/audit/github').catch(() => ({ data: null }))
       ])
       setBlocks(blocksRes.data)
       setPredictionLockHours(settingsRes.data.prediction_lock_hours ?? 3)
+      setGithubAudit(githubAuditRes.data)
       
       // Auto-select first block if present
       if (blocksRes.data.length > 0) {
@@ -205,6 +209,29 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
           </Typography>
           
           <Divider sx={{ my: 1.5, borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+
+          {githubAudit?.repository_url && (
+            <Alert
+              severity={githubAudit.enabled ? 'success' : 'info'}
+              sx={{ mb: 2, borderRadius: 2, alignItems: 'center' }}
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  href={githubAudit.repository_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  endIcon={<OpenInNewIcon fontSize="small" />}
+                >
+                  Abrir
+                </Button>
+              }
+            >
+              Os blocos de palpites também são publicados no repositório externo de auditoria:
+              {' '}
+              <strong>{githubAudit.repository_url.replace('https://github.com/', '')}</strong>.
+            </Alert>
+          )}
           
           <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: 'text.primary' }}>
             🛠️ Passo a Passo para Validação Independente (Via Site Público):

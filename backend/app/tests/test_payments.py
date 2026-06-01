@@ -180,3 +180,41 @@ def test_admin_approve_reject_flow(client, db_session, test_users):
     
     db_session.refresh(p1)
     assert p1.payment_status == "approved"
+
+
+def test_payment_approval_sends_notification(client, db_session, test_users, monkeypatch):
+    admin = test_users[0]
+    p1 = test_users[2]
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, headers, files, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["files"] = files
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("WHATSAPP_NOTIFY_ENABLED", "true")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_URL", "http://notify.test/internal/v1/send")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TOKEN", "secret-token")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TO", "120363407064163865@g.us")
+    monkeypatch.setattr("app.notifications.requests.post", fake_post)
+
+    p1.payment_status = "submitted"
+    p1.display_name = "Ana  Teste"
+    db_session.commit()
+
+    admin_headers = get_auth_headers(client, admin.username)
+    res = client.post(f"/api/payments/admin/approve/{p1.id}", headers=admin_headers)
+
+    assert res.status_code == 200
+    assert captured["url"] == "http://notify.test/internal/v1/send"
+    assert captured["headers"] == {"Authorization": "Bearer secret-token"}
+    assert captured["files"]["to"] == (None, "120363407064163865@g.us")
+    assert captured["files"]["text"] == (None, "\U0001f4b0 Pagamento de Ana Teste foi aprovado!")
+    assert captured["files"]["sendAs"] == (None, "text")
+    assert captured["timeout"] == 5.0

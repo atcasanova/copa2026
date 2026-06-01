@@ -12,6 +12,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Predictions from './pages/Predictions'
 import Rankings from './pages/Rankings'
+import Tables from './pages/Tables'
 import Groups from './pages/Groups'
 import GroupDetails from './pages/GroupDetails'
 import Profile from './pages/Profile'
@@ -70,6 +71,7 @@ function AppContent() {
         <Route index element={<Dashboard />} />
         <Route path="predictions" element={<Predictions />} />
         <Route path="rankings" element={<Rankings />} />
+        <Route path="tables" element={<Tables />} />
         <Route path="groups" element={<Groups />} />
         <Route path="groups/:groupId" element={<GroupDetails />} />
         <Route path="profile" element={<Profile />} />

@@ -113,6 +113,32 @@ def test_invitation_registration_lock(client, db_session, test_users):
     res_reuse = client.post(f"/api/auth/register?invite_code={invite_code}", json=reg_reuse)
     assert res_reuse.status_code == 400
 
+def test_hidden_registration_link_creates_active_user(client, db_session, test_users):
+    admin = test_users[0]
+    admin_headers = get_auth_headers(client, admin.username)
+
+    link_res = client.get("/api/admin/registration-link", headers=admin_headers)
+    assert link_res.status_code == 200
+    registration_code = link_res.json()["code"]
+
+    reg_data = {
+        "username": "direct_user",
+        "email": "direct@test.com",
+        "display_name": "Direct User",
+        "password": "securepassword123"
+    }
+    register_res = client.post(f"/api/auth/register?registration_code={registration_code}", json=reg_data)
+    assert register_res.status_code == 201
+    assert register_res.json()["is_active"] is True
+
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.username == "direct_user").first()
+    assert user is not None
+    assert user.is_active is True
+
+    login_res = client.post("/api/auth/login", data={"username": "direct_user", "password": "securepassword123"})
+    assert login_res.status_code == 200
+
 def test_admin_exclusion_from_rankings(client, db_session, test_users):
     # Ensure system_admin is in users but not in computed rankings
     admin = test_users[0]

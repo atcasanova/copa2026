@@ -104,6 +104,18 @@ class MatchResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class MatchScoreUpdate(BaseModel):
+    match_id: int
+    score_ft_team1: int = Field(..., ge=0)
+    score_ft_team2: int = Field(..., ge=0)
+    score_et_team1: Optional[int] = Field(None, ge=0)
+    score_et_team2: Optional[int] = Field(None, ge=0)
+    score_pen_team1: Optional[int] = Field(None, ge=0)
+    score_pen_team2: Optional[int] = Field(None, ge=0)
+
+class MatchScoreBatchUpdate(BaseModel):
+    scores: List[MatchScoreUpdate] = Field(..., min_length=1, max_length=20)
+
 # Prediction Schemas
 class PredictionCreate(BaseModel):
     goals_team1: int = Field(..., ge=0)
@@ -132,6 +144,21 @@ class PredictionBulkUpdate(BaseModel):
     goals_team1: int = Field(..., ge=0)
     goals_team2: int = Field(..., ge=0)
     qualified_team_name: Optional[str] = None
+
+class MatchPredictionVisibilityEntry(BaseModel):
+    user_id: UUID
+    display_name: str
+    avatar_url: Optional[str] = None
+    created_at: datetime
+    goals_team1: Optional[int] = None
+    goals_team2: Optional[int] = None
+    qualified_team_name: Optional[str] = None
+
+class MatchPredictionVisibilityResponse(BaseModel):
+    match_id: int
+    is_locked: bool
+    total_predictions: int
+    entries: List[MatchPredictionVisibilityEntry]
 
 # Group Schemas
 class GroupCreate(BaseModel):

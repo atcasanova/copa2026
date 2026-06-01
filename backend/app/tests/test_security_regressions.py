@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models import Announcement, Group, GroupMember, Match, PasswordResetToken, Stadium, Team, User
+from app.models import Announcement, AuditLog, Group, GroupMember, Match, PasswordResetToken, Prediction, Stadium, Team, User
 from app.auth import verify_password
 
 
@@ -137,6 +137,18 @@ def test_password_reset_flow(client, db_session, test_users, monkeypatch):
     assert new_login.status_code == 200
 
 
+def test_profile_config_exposes_whatsapp_group_chat(client, test_users, monkeypatch):
+    user = test_users[2]
+    monkeypatch.setenv("WHATSAPP_GROUP_CHAT", "chat.whatsapp.com/FAKEINVITE")
+
+    login_res = client.post("/api/auth/login", data={"username": user.username, "password": "password"})
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+    res = client.get("/api/auth/profile-config", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["whatsapp_group_chat"] == "https://chat.whatsapp.com/FAKEINVITE"
+
+
 def test_admin_can_change_prediction_lock_hours(client, db_session, test_users):
     admin = test_users[0]
     participant = test_users[2]
@@ -181,3 +193,138 @@ def test_admin_can_change_prediction_lock_hours(client, db_session, test_users):
         json={"goals_team1": 1, "goals_team2": 0}
     )
     assert allowed.status_code == 200
+
+
+def test_match_prediction_visibility_hides_scores_before_lock(client, db_session, test_users):
+    viewer = test_users[2]
+    participant = test_users[3]
+
+    db_session.add_all([
+        Team(name="Brasil", group_name="A"),
+        Team(name="Canada", group_name="A"),
+        Stadium(name="Visibility Stadium", city="City", timezone="UTC")
+    ])
+    db_session.commit()
+
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="18:00 UTC+0",
+        kickoff_time=datetime.utcnow() + timedelta(hours=5),
+        team1_name="Brasil",
+        team2_name="Canada",
+        ground="Visibility Stadium",
+        status="scheduled"
+    )
+    db_session.add(match)
+    db_session.commit()
+    db_session.add(Prediction(match_id=match.id, user_id=participant.id, goals_team1=2, goals_team2=1))
+    db_session.commit()
+
+    headers = login_headers(client, viewer.username)
+    res = client.get(f"/api/predictions/match/{match.id}/visibility", headers=headers)
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_locked"] is False
+    assert data["total_predictions"] == 1
+    assert data["entries"][0]["display_name"] == participant.display_name
+    assert data["entries"][0]["goals_team1"] is None
+    assert data["entries"][0]["goals_team2"] is None
+
+
+def test_match_prediction_visibility_shows_scores_after_lock(client, db_session, test_users):
+    viewer = test_users[2]
+    participant = test_users[3]
+
+    db_session.add_all([
+        Team(name="Brasil", group_name="A"),
+        Team(name="Canada", group_name="A"),
+        Stadium(name="Locked Visibility Stadium", city="City", timezone="UTC")
+    ])
+    db_session.commit()
+
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="18:00 UTC+0",
+        kickoff_time=datetime.utcnow() + timedelta(hours=1),
+        team1_name="Brasil",
+        team2_name="Canada",
+        ground="Locked Visibility Stadium",
+        status="scheduled"
+    )
+    db_session.add(match)
+    db_session.commit()
+    db_session.add(Prediction(match_id=match.id, user_id=participant.id, goals_team1=2, goals_team2=1))
+    db_session.commit()
+
+    headers = login_headers(client, viewer.username)
+    res = client.get(f"/api/predictions/match/{match.id}/visibility", headers=headers)
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_locked"] is True
+    assert data["entries"][0]["goals_team1"] == 2
+    assert data["entries"][0]["goals_team2"] == 1
+
+
+def test_system_admin_can_delete_participant(client, db_session, test_users):
+    admin = test_users[0]
+    owner = test_users[2]
+    participant = test_users[3]
+
+    group = Group(
+        name="Grupo Teste",
+        owner_id=owner.id,
+        invite_code="DELETE123",
+        is_private=False
+    )
+    db_session.add(group)
+    db_session.commit()
+    db_session.add(GroupMember(group_id=group.id, user_id=participant.id, role="member", is_approved=True))
+    db_session.commit()
+
+    headers = login_headers(client, admin.username)
+    res = client.delete(f"/api/admin/users/{participant.id}", headers=headers)
+
+    assert res.status_code == 204
+    assert db_session.query(User).filter(User.id == participant.id).first() is None
+    assert db_session.query(GroupMember).filter(GroupMember.user_id == participant.id).first() is None
+
+    audit = db_session.query(AuditLog).filter(AuditLog.action == "user_delete").first()
+    assert audit is not None
+    assert audit.user_id == admin.id
+    assert audit.target_id == str(participant.id)
+
+
+def test_system_admin_cannot_delete_self(client, db_session, test_users):
+    admin = test_users[0]
+    headers = login_headers(client, admin.username)
+
+    res = client.delete(f"/api/admin/users/{admin.id}", headers=headers)
+
+    assert res.status_code == 400
+    assert "próprio usuário" in res.json()["detail"]
+
+
+def test_system_admin_cannot_delete_group_owner(client, db_session, test_users):
+    admin = test_users[0]
+    owner = test_users[2]
+    group = Group(
+        name="Grupo Protegido",
+        owner_id=owner.id,
+        invite_code="OWNER123",
+        is_private=False
+    )
+    db_session.add(group)
+    db_session.commit()
+
+    headers = login_headers(client, admin.username)
+    res = client.delete(f"/api/admin/users/{owner.id}", headers=headers)
+
+    assert res.status_code == 400
+    assert "proprietário" in res.json()["detail"]
+    assert db_session.query(User).filter(User.id == owner.id).first() is not None

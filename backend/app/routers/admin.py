@@ -6,19 +6,21 @@ from datetime import datetime
 import io
 import csv
 import secrets
+import os
 from fastapi.responses import StreamingResponse
 
 from ..db import get_db
-from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting, Group
+from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting, Group, GroupInvitation, PasswordResetToken
 from ..schemas import (
     MatchResponse, StageMultiplierResponse, StageMultiplierUpdate, MultiplierHistoryResponse,
     AnnouncementCreate, AnnouncementResponse, UserResponse, AuditLogResponse, SyncLogResponse, SyncMatchDiffResponse,
-    SystemInvitationCreate, SystemInvitationResponse
+    SystemInvitationCreate, SystemInvitationResponse, MatchScoreBatchUpdate, MatchScoreUpdate
 )
 from ..auth import require_system_admin, require_score_admin, require_participant
 from ..scoring import recalculate_match_predictions, recalculate_all_predictions_and_rankings, get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache
 from ..sync import seed_initial_data, sync_openfootball_data
 from ..settings import get_prediction_lock_hours, set_prediction_lock_hours, MAX_PREDICTION_LOCK_HOURS
+from ..notifications import send_general_ranking_notification
 
 def sanitize_csv_value(val) -> str:
     if val is None:
@@ -50,6 +52,42 @@ router = APIRouter(prefix="/api/admin", tags=["Administration"])
 # 1. Match Management (Score Admin / System Admin)
 # ==========================================
 
+def _set_match_score(db: Session, match: Match, score: MatchScoreUpdate, current_user: User) -> Match:
+    old_val = {
+        "score_ft_team1": match.score_ft_team1, "score_ft_team2": match.score_ft_team2,
+        "score_et_team1": match.score_et_team1, "score_et_team2": match.score_et_team2,
+        "score_pen_team1": match.score_pen_team1, "score_pen_team2": match.score_pen_team2,
+        "status": match.status
+    }
+
+    match.score_ft_team1 = score.score_ft_team1
+    match.score_ft_team2 = score.score_ft_team2
+    match.score_et_team1 = score.score_et_team1
+    match.score_et_team2 = score.score_et_team2
+    match.score_pen_team1 = score.score_pen_team1
+    match.score_pen_team2 = score.score_pen_team2
+    match.status = "score_pending_review"
+
+    db.flush()
+
+    new_val = {
+        "score_ft_team1": match.score_ft_team1, "score_ft_team2": match.score_ft_team2,
+        "score_et_team1": match.score_et_team1, "score_et_team2": match.score_et_team2,
+        "score_pen_team1": match.score_pen_team1, "score_pen_team2": match.score_pen_team2,
+        "status": match.status
+    }
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="match_score_insert",
+        target_type="match",
+        target_id=str(match.id),
+        old_value=old_val,
+        new_value=new_val
+    )
+    db.add(audit)
+    return match
+
 @router.post("/matches/{match_id}/score", response_model=MatchResponse)
 def update_match_score(
     match_id: int,
@@ -66,49 +104,50 @@ def update_match_score(
     if not match:
         raise HTTPException(status_code=404, detail="Partida não encontrada.")
 
-    old_val = {
-        "score_ft_team1": match.score_ft_team1, "score_ft_team2": match.score_ft_team2,
-        "score_et_team1": match.score_et_team1, "score_et_team2": match.score_et_team2,
-        "score_pen_team1": match.score_pen_team1, "score_pen_team2": match.score_pen_team2,
-        "status": match.status
-    }
-
-    match.score_ft_team1 = score_ft_team1
-    match.score_ft_team2 = score_ft_team2
-    match.score_et_team1 = score_et_team1
-    match.score_et_team2 = score_et_team2
-    match.score_pen_team1 = score_pen_team1
-    match.score_pen_team2 = score_pen_team2
-    
-    # Set status to pending review or finished
-    match.status = "score_pending_review"
-
+    score = MatchScoreUpdate(
+        match_id=match_id,
+        score_ft_team1=score_ft_team1,
+        score_ft_team2=score_ft_team2,
+        score_et_team1=score_et_team1,
+        score_et_team2=score_et_team2,
+        score_pen_team1=score_pen_team1,
+        score_pen_team2=score_pen_team2
+    )
+    _set_match_score(db, match, score, current_user)
     db.commit()
     db.refresh(match)
 
-    new_val = {
-        "score_ft_team1": match.score_ft_team1, "score_ft_team2": match.score_ft_team2,
-        "score_et_team1": match.score_et_team1, "score_et_team2": match.score_et_team2,
-        "score_pen_team1": match.score_pen_team1, "score_pen_team2": match.score_pen_team2,
-        "status": match.status
-    }
-
-    # Log action
-    audit = AuditLog(
-        user_id=current_user.id,
-        action="match_score_insert",
-        target_type="match",
-        target_id=str(match.id),
-        old_value=old_val,
-        new_value=new_val
-    )
-    db.add(audit)
-    db.commit()
-
     # Recalculate predictions
     recalculate_match_predictions(db, match.id)
+    send_general_ranking_notification(db)
 
     return match
+
+@router.post("/matches/score-batch", response_model=List[MatchResponse])
+def update_match_scores_batch(
+    payload: MatchScoreBatchUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    matches_by_id = {
+        match.id: match
+        for match in db.query(Match).filter(Match.id.in_([score.match_id for score in payload.scores])).all()
+    }
+    missing_ids = [score.match_id for score in payload.scores if score.match_id not in matches_by_id]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Partida(s) não encontrada(s): {', '.join(map(str, missing_ids))}.")
+
+    updated_matches = []
+    for score in payload.scores:
+        updated_matches.append(_set_match_score(db, matches_by_id[score.match_id], score, current_user))
+
+    db.commit()
+    for match in updated_matches:
+        db.refresh(match)
+        recalculate_match_predictions(db, match.id)
+
+    send_general_ranking_notification(db)
+    return updated_matches
 
 @router.post("/matches/{match_id}/confirm-score", response_model=MatchResponse)
 def confirm_match_score(
@@ -581,6 +620,59 @@ def change_user_status(
     db.refresh(user)
     
     return user
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Você não pode remover seu próprio usuário.")
+
+    owned_groups_count = db.query(Group).filter(Group.owner_id == user_id).count()
+    if owned_groups_count:
+        raise HTTPException(
+            status_code=400,
+            detail="Este usuário é proprietário de grupo(s). Transfira ou remova os grupos antes de excluir o usuário."
+        )
+
+    proof_filename = user.payment_proof_filename
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="user_delete",
+        target_type="user",
+        target_id=str(user.id),
+        old_value={
+            "username": user.username,
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role
+        }
+    )
+    db.add(audit)
+
+    db.query(AuditLog).filter(AuditLog.user_id == user_id).update({"user_id": None})
+    db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(GroupInvitation).filter(GroupInvitation.invited_by_id == user_id).delete(synchronize_session=False)
+    db.query(GroupInvitation).filter(GroupInvitation.invitee_id == user_id).delete(synchronize_session=False)
+    db.query(SystemInvitation).filter(SystemInvitation.used_by_id == user_id).update({"used_by_id": None})
+
+    db.delete(user)
+    db.commit()
+    invalidate_ranking_cache(db)
+
+    if proof_filename:
+        proof_path = os.path.join("/app/uploads", proof_filename)
+        try:
+            if os.path.exists(proof_path):
+                os.remove(proof_path)
+        except OSError:
+            pass
 
 # ==========================================
 # 6. Audit Logs (System Admin Only)

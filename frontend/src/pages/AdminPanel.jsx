@@ -3,7 +3,7 @@ import {
   Box, Card, CardContent, Typography, Tabs, Tab, Grid, TextField, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   MenuItem, Select, FormControl, InputLabel, Switch, Alert, Snackbar, Stack,
-  Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link
+  Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link, Badge
 } from '@mui/material'
 import {
   ExpandMore as ExpandIcon,
@@ -35,14 +35,8 @@ export default function AdminPanel() {
   
   // 0. Matches Management State
   const [filterStage, setFilterStage] = useState('All')
-  const [editingMatch, setEditingMatch] = useState(null)
-  const [goals1, setGoals1] = useState('')
-  const [goals2, setGoals2] = useState('')
-  const [etGoals1, setEtGoals1] = useState('')
-  const [etGoals2, setEtGoals2] = useState('')
-  const [penGoals1, setPenGoals1] = useState('')
-  const [penGoals2, setPenGoals2] = useState('')
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [scoreDrafts, setScoreDrafts] = useState({})
+  const [savingScoreGroup, setSavingScoreGroup] = useState(null)
 
   // 1. Sync State
   const [syncDiffs, setSyncDiffs] = useState([])
@@ -69,6 +63,8 @@ export default function AdminPanel() {
   // 4. Users State
   const [usersList, setUsersList] = useState([])
   const [userSearch, setUserSearch] = useState('')
+  const [deleteUserTarget, setDeleteUserTarget] = useState(null)
+  const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false)
 
   // 5. Audit Logs State
   const [auditLogs, setAuditLogs] = useState([])
@@ -100,8 +96,9 @@ export default function AdminPanel() {
       setError('')
       
       // Load matches
-      const matchesRes = await axios.get('/api/matches')
+      const matchesRes = await axios.get('/api/matches?missing_score=true&limit=5')
       setMatches(matchesRes.data)
+      setScoreDrafts(createScoreDrafts(matchesRes.data))
       setStages(['All', ...new Set(matchesRes.data.map(m => m.stage))])
 
       // Depending on permissions and active tab, fetch other data
@@ -175,38 +172,93 @@ export default function AdminPanel() {
   // ==========================================
   // 0. Matches Actions
   // ==========================================
-  const handleEditMatch = (match) => {
-    setEditingMatch(match)
-    setGoals1(match.score_ft_team1 ?? '')
-    setGoals2(match.score_ft_team2 ?? '')
-    setEtGoals1(match.score_et_team1 ?? '')
-    setEtGoals2(match.score_et_team2 ?? '')
-    setPenGoals1(match.score_pen_team1 ?? '')
-    setPenGoals2(match.score_pen_team2 ?? '')
-    setDialogOpen(true)
+  const createScoreDrafts = (matchesList) => {
+    const drafts = {}
+    matchesList.forEach(match => {
+      drafts[match.id] = {
+        score_ft_team1: match.score_ft_team1 ?? '',
+        score_ft_team2: match.score_ft_team2 ?? '',
+        score_et_team1: match.score_et_team1 ?? '',
+        score_et_team2: match.score_et_team2 ?? '',
+        score_pen_team1: match.score_pen_team1 ?? '',
+        score_pen_team2: match.score_pen_team2 ?? ''
+      }
+    })
+    return drafts
   }
 
-  const handleSaveScore = async () => {
-    if (goals1 === '' || goals2 === '') {
-      alert('Os gols regulamentares (tempo normal) são obrigatórios.')
-      return
-    }
-    
-    try {
-      let query = `/api/admin/matches/${editingMatch.id}/score?score_ft_team1=${goals1}&score_ft_team2=${goals2}`;
-      if (etGoals1 !== '' && etGoals2 !== '') {
-        query += `&score_et_team1=${etGoals1}&score_et_team2=${etGoals2}`;
+  const getScoreDraft = (matchId) => scoreDrafts[matchId] || {
+    score_ft_team1: '',
+    score_ft_team2: '',
+    score_et_team1: '',
+    score_et_team2: '',
+    score_pen_team1: '',
+    score_pen_team2: ''
+  }
+
+  const handleScoreDraftChange = (matchId, field, value) => {
+    if (value !== '' && !/^\d+$/.test(value)) return
+    setScoreDrafts(prev => ({
+      ...prev,
+      [matchId]: {
+        ...getScoreDraft(matchId),
+        [field]: value
       }
-      if (penGoals1 !== '' && penGoals2 !== '') {
-        query += `&score_pen_team1=${penGoals1}&score_pen_team2=${penGoals2}`;
+    }))
+  }
+
+  const buildScoreUpdatePayload = (match, draft) => {
+    const ft1 = draft.score_ft_team1
+    const ft2 = draft.score_ft_team2
+    const isGroupStage = match.stage === 'Group Stage'
+    const et1 = isGroupStage ? '' : draft.score_et_team1
+    const et2 = isGroupStage ? '' : draft.score_et_team2
+    const pen1 = isGroupStage ? '' : draft.score_pen_team1
+    const pen2 = isGroupStage ? '' : draft.score_pen_team2
+
+    const hasAnyValue = [ft1, ft2, et1, et2, pen1, pen2].some(v => v !== '')
+    if (!hasAnyValue) return null
+
+    if (ft1 === '' || ft2 === '') {
+      throw new Error(`Informe o placar do tempo normal para ${match.team1_name} x ${match.team2_name}.`)
+    }
+    if ((et1 === '') !== (et2 === '')) {
+      throw new Error(`Preencha os dois campos de prorrogação para ${match.team1_name} x ${match.team2_name}, ou deixe ambos vazios.`)
+    }
+    if ((pen1 === '') !== (pen2 === '')) {
+      throw new Error(`Preencha os dois campos de pênaltis para ${match.team1_name} x ${match.team2_name}, ou deixe ambos vazios.`)
+    }
+
+    return {
+      match_id: match.id,
+      score_ft_team1: Number(ft1),
+      score_ft_team2: Number(ft2),
+      score_et_team1: et1 !== '' ? Number(et1) : null,
+      score_et_team2: et2 !== '' ? Number(et2) : null,
+      score_pen_team1: pen1 !== '' ? Number(pen1) : null,
+      score_pen_team2: pen2 !== '' ? Number(pen2) : null
+    }
+  }
+
+  const handleSaveScoreGroup = async (groupKey, groupMatches) => {
+    try {
+      const updates = groupMatches
+        .map(match => buildScoreUpdatePayload(match, getScoreDraft(match.id)))
+        .filter(Boolean)
+
+      if (updates.length === 0) {
+        alert('Informe pelo menos um placar para salvar este horário.')
+        return
       }
 
-      await axios.post(query)
-      setDialogOpen(false)
-      showSuccess('Placar salvo com sucesso como pendente de revisão!')
+      setSavingScoreGroup(groupKey)
+      await axios.post('/api/admin/matches/score-batch', { scores: updates })
+      showSuccess(`${updates.length} placar(es) salvo(s) como pendente(s) de revisão.`)
       loadInitialData()
     } catch (err) {
-      alert('Erro ao salvar placar.')
+      alert(err.message || 'Erro ao salvar placares deste horário.')
+    } finally {
+      setSavingScoreGroup(null)
     }
   }
 
@@ -393,6 +445,24 @@ export default function AdminPanel() {
     }
   }
 
+  const handleOpenDeleteUserDialog = (targetUser) => {
+    setDeleteUserTarget(targetUser)
+    setDeleteUserDialogOpen(true)
+  }
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteUserTarget) return
+    try {
+      await axios.delete(`/api/admin/users/${deleteUserTarget.id}`)
+      showSuccess(`Usuário ${deleteUserTarget.display_name} removido com sucesso.`)
+      setDeleteUserDialogOpen(false)
+      setDeleteUserTarget(null)
+      loadInitialData()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao remover usuário.')
+    }
+  }
+
   const handleExportCSV = async (type) => {
     try {
       const response = await axios.get(`/api/admin/export/${type}`, {
@@ -496,6 +566,29 @@ export default function AdminPanel() {
     if (filterStage !== 'All' && m.stage !== filterStage) return false
     return true
   })
+
+  const pendingPaymentApprovalsCount = paymentUsers.filter(u => u.payment_status === 'submitted').length
+
+  const groupedMatchesByKickoff = filteredMatches.reduce((groupsAcc, match) => {
+    const key = match.kickoff_time
+    if (!groupsAcc[key]) {
+      groupsAcc[key] = {
+        key,
+        kickoff_time: match.kickoff_time,
+        date: match.date,
+        matches: []
+      }
+    }
+    groupsAcc[key].matches.push(match)
+    return groupsAcc
+  }, {})
+
+  const matchTimeGroups = Object.values(groupedMatchesByKickoff)
+    .sort((a, b) => new Date(a.kickoff_time) - new Date(b.kickoff_time))
+    .map(group => ({
+      ...group,
+      matches: group.matches.sort((a, b) => a.id - b.id)
+    }))
 
   const filteredUsers = usersList.filter(u => {
     if (userSearch.trim()) {
@@ -608,9 +701,20 @@ export default function AdminPanel() {
         <Tab icon={<SyncIcon />} label="Sincronização" iconPosition="start" sx={{ fontWeight: 'bold' }} />
         {user?.role === 'system_admin' && <Tab icon={<ConfigIcon />} label="Config. Pontuação" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
         {user?.role === 'system_admin' && <Tab icon={<AnnIcon />} label="Publicar Comunicados" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-        {user?.role === 'system_admin' && <Tab icon={<PeopleIcon />} label="Usuários & Acessos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-        {user?.role === 'system_admin' && <Tab icon={<HistoryIcon />} label="Auditoria & Exportar" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-        {user?.role === 'system_admin' && <Tab icon={<PaymentIcon />} label="Pagamentos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+	        {user?.role === 'system_admin' && <Tab icon={<PeopleIcon />} label="Usuários & Acessos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+	        {user?.role === 'system_admin' && <Tab icon={<HistoryIcon />} label="Auditoria & Exportar" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+	        {user?.role === 'system_admin' && (
+	          <Tab
+	            icon={
+	              <Badge badgeContent={pendingPaymentApprovalsCount} color="warning" invisible={pendingPaymentApprovalsCount === 0} max={99}>
+	                <PaymentIcon />
+	              </Badge>
+	            }
+	            label="Pagamentos"
+	            iconPosition="start"
+	            sx={{ fontWeight: 'bold' }}
+	          />
+	        )}
         {user?.role === 'system_admin' && <Tab icon={<MailIcon />} label="Convites" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
       </Tabs>
 
@@ -634,133 +738,190 @@ export default function AdminPanel() {
             </CardContent>
           </Card>
 
-          <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Fase / ID</TableCell>
-                  <TableCell>Partida</TableCell>
-                  <TableCell align="center">Placar Cadastrado</TableCell>
-                  <TableCell align="center">Status Interno</TableCell>
-                  <TableCell align="center">Ações</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredMatches.map(match => (
-                  <TableRow key={match.id}>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{match.round}</Typography>
-                      <Typography variant="caption" color="text.secondary">ID: #{match.id}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                        {match.team1_name} x {match.team2_name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">📍 {match.ground}</Typography>
-                    </TableCell>
-                    <TableCell align="center">
-                      {match.score_ft_team1 !== null ? (
-                        <Box>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                            {match.score_ft_team1} - {match.score_ft_team2}
-                          </Typography>
-                          {match.score_et_team1 !== null && (
-                            <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
-                              Prorrogação: {match.score_et_team1} x {match.score_et_team2}
-                            </Typography>
-                          )}
-                          {match.score_pen_team1 !== null && (
-                            <Typography variant="caption" color="info.main" sx={{ display: 'block' }}>
-                              Pênaltis: ({match.score_pen_team1} - {match.score_pen_team2})
-                            </Typography>
-                          )}
-                        </Box>
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">Não registrado</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell align="center">
-                      {match.status === 'score_confirmed' ? (
-                        <Chip label="Confirmado" color="success" size="small" />
-                      ) : match.status === 'score_pending_review' ? (
-                        <Chip label="Revisar" color="warning" size="small" />
-                      ) : match.status === 'postponed' ? (
-                        <Chip label="Adiado" color="error" size="small" />
-                      ) : match.status === 'cancelled' ? (
-                        <Chip label="Cancelado" color="error" size="small" />
-                      ) : (
-                        <Chip label="Agendado" variant="outlined" size="small" />
-                      )}
-                    </TableCell>
-                    <TableCell align="center">
-                      <Stack direction="row" spacing={1} justifyContent="center">
-                        <Button size="small" variant="contained" onClick={() => handleEditMatch(match)}>
-                          Definir Placar
-                        </Button>
-                        {match.status === 'score_pending_review' && (
-                          <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />} onClick={() => handleConfirmScore(match.id)}>
-                            Confirmar
-                          </Button>
-                        )}
-                        <Select
-                          size="small"
-                          value={match.status}
-                          onChange={(e) => handleStatusChange(match.id, e.target.value)}
-                          sx={{ height: 30, fontSize: '0.75rem' }}
-                        >
-                          <MenuItem value="scheduled">Agendado</MenuItem>
-                          <MenuItem value="postponed">Adiado</MenuItem>
-                          <MenuItem value="cancelled">Cancelado</MenuItem>
-                        </Select>
-                      </Stack>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+	          {matchTimeGroups.length === 0 ? (
+	            <Alert severity="info" sx={{ borderRadius: 2 }}>
+	              Nenhuma partida encontrada para o filtro selecionado.
+	            </Alert>
+	          ) : (
+	            <Stack spacing={3}>
+	              {matchTimeGroups.map(group => (
+	                <Card key={group.key}>
+	                  <CardContent sx={{ p: 0 }}>
+	                    {(() => {
+	                      const hasKnockoutMatch = group.matches.some(match => match.stage !== 'Group Stage')
+	                      return (
+	                        <>
+	                    <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid #1f2937' }}>
+	                      <Box>
+	                        <Typography variant="subtitle1" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+	                          {formatDateTime(group.kickoff_time)}
+	                        </Typography>
+	                        <Typography variant="caption" color="text.secondary">
+	                          {group.matches.length} partida(s) neste horário
+	                        </Typography>
+	                      </Box>
+	                      <Button
+	                        variant="contained"
+	                        color="primary"
+	                        startIcon={<SaveIcon />}
+	                        disabled={savingScoreGroup === group.key}
+	                        onClick={() => handleSaveScoreGroup(group.key, group.matches)}
+	                      >
+	                        {savingScoreGroup === group.key ? 'Salvando...' : 'Salvar este horário'}
+	                      </Button>
+	                    </Box>
 
-          {/* Dialog for Score Editing */}
-          <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
-            <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 'bold' }}>Definir Placar Oficinal</DialogTitle>
-            <DialogContent>
-              {editingMatch && (
-                <Stack spacing={2} sx={{ mt: 1, minWidth: 350 }}>
-                  <Typography variant="subtitle2" align="center" sx={{ fontWeight: 'bold' }}>
-                    {editingMatch.team1_name} vs {editingMatch.team2_name}
-                  </Typography>
-                  <Divider />
-                  
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Placar Tempo Normal + Prorrogação (120 mins):</Typography>
-                  <Stack direction="row" spacing={2} justifyContent="center" alignItems="center">
-                    <TextField label={editingMatch.team1_name} size="small" type="number" value={goals1} onChange={(e) => setGoals1(e.target.value)} />
-                    <Typography>x</Typography>
-                    <TextField label={editingMatch.team2_name} size="small" type="number" value={goals2} onChange={(e) => setGoals2(e.target.value)} />
-                  </Stack>
-
-                  <Typography variant="body2" sx={{ fontWeight: 600, mt: 1 }}>Placar Prorrogação (Total se houver):</Typography>
-                  <Stack direction="row" spacing={2} justifyContent="center" alignItems="center">
-                    <TextField label="Gols Mandante" size="small" type="number" value={etGoals1} onChange={(e) => setEtGoals1(e.target.value)} placeholder="vazio" />
-                    <Typography>x</Typography>
-                    <TextField label="Gols Visitante" size="small" type="number" value={etGoals2} onChange={(e) => setEtGoals2(e.target.value)} placeholder="vazio" />
-                  </Stack>
-
-                  <Typography variant="body2" sx={{ fontWeight: 600, mt: 1 }}>Decisão por Pênaltis (Disputa se houver):</Typography>
-                  <Stack direction="row" spacing={2} justifyContent="center" alignItems="center">
-                    <TextField label="Pênaltis Mandante" size="small" type="number" value={penGoals1} onChange={(e) => setPenGoals1(e.target.value)} placeholder="vazio" />
-                    <Typography>x</Typography>
-                    <TextField label="Pênaltis Visitante" size="small" type="number" value={penGoals2} onChange={(e) => setPenGoals2(e.target.value)} placeholder="vazio" />
-                  </Stack>
-                </Stack>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
-              <Button onClick={handleSaveScore} variant="contained" color="primary">Salvar Placar</Button>
-            </DialogActions>
-          </Dialog>
-        </Stack>
-      )}
+	                    <TableContainer component={Paper} sx={{ boxShadow: 'none' }}>
+	                      <Table size="small">
+	                        <TableHead>
+	                          <TableRow>
+	                            <TableCell>Partida</TableCell>
+	                            <TableCell align="center">Tempo Normal</TableCell>
+	                            {hasKnockoutMatch && <TableCell align="center">Prorrogação</TableCell>}
+	                            {hasKnockoutMatch && <TableCell align="center">Pênaltis</TableCell>}
+	                            <TableCell align="center">Status</TableCell>
+	                            <TableCell align="center">Ações</TableCell>
+	                          </TableRow>
+	                        </TableHead>
+	                        <TableBody>
+	                          {group.matches.map(match => {
+	                            const draft = getScoreDraft(match.id)
+	                            return (
+	                              <TableRow key={match.id}>
+	                                <TableCell sx={{ minWidth: 260 }}>
+	                                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+	                                    {match.team1_name} x {match.team2_name}
+	                                  </Typography>
+	                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+	                                    {match.round} · ID #{match.id}
+	                                  </Typography>
+	                                  <Typography variant="caption" color="text.secondary">
+	                                    {match.ground}
+	                                  </Typography>
+	                                </TableCell>
+	                                <TableCell align="center">
+	                                  <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+	                                    <TextField
+	                                      size="small"
+	                                      type="number"
+	                                      value={draft.score_ft_team1}
+	                                      onChange={(e) => handleScoreDraftChange(match.id, 'score_ft_team1', e.target.value)}
+	                                      inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
+	                                      sx={{ width: 64 }}
+	                                    />
+	                                    <Typography variant="body2">x</Typography>
+	                                    <TextField
+	                                      size="small"
+	                                      type="number"
+	                                      value={draft.score_ft_team2}
+	                                      onChange={(e) => handleScoreDraftChange(match.id, 'score_ft_team2', e.target.value)}
+	                                      inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
+	                                      sx={{ width: 64 }}
+	                                    />
+	                                  </Stack>
+	                                </TableCell>
+	                                {hasKnockoutMatch && (
+	                                  <TableCell align="center">
+	                                    {match.stage === 'Group Stage' ? (
+	                                      <Typography variant="caption" color="text.secondary">-</Typography>
+	                                    ) : (
+	                                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+	                                        <TextField
+	                                          size="small"
+	                                          type="number"
+	                                          value={draft.score_et_team1}
+	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_et_team1', e.target.value)}
+	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
+	                                          sx={{ width: 64 }}
+	                                        />
+	                                        <Typography variant="body2">x</Typography>
+	                                        <TextField
+	                                          size="small"
+	                                          type="number"
+	                                          value={draft.score_et_team2}
+	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_et_team2', e.target.value)}
+	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
+	                                          sx={{ width: 64 }}
+	                                        />
+	                                      </Stack>
+	                                    )}
+	                                  </TableCell>
+	                                )}
+	                                {hasKnockoutMatch && (
+	                                  <TableCell align="center">
+	                                    {match.stage === 'Group Stage' ? (
+	                                      <Typography variant="caption" color="text.secondary">-</Typography>
+	                                    ) : (
+	                                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+	                                        <TextField
+	                                          size="small"
+	                                          type="number"
+	                                          value={draft.score_pen_team1}
+	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_pen_team1', e.target.value)}
+	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
+	                                          sx={{ width: 64 }}
+	                                        />
+	                                        <Typography variant="body2">x</Typography>
+	                                        <TextField
+	                                          size="small"
+	                                          type="number"
+	                                          value={draft.score_pen_team2}
+	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_pen_team2', e.target.value)}
+	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
+	                                          sx={{ width: 64 }}
+	                                        />
+	                                      </Stack>
+	                                    )}
+	                                  </TableCell>
+	                                )}
+	                                <TableCell align="center">
+	                                  {match.status === 'score_confirmed' ? (
+	                                    <Chip label="Confirmado" color="success" size="small" />
+	                                  ) : match.status === 'score_pending_review' ? (
+	                                    <Chip label="Revisar" color="warning" size="small" />
+	                                  ) : match.status === 'postponed' ? (
+	                                    <Chip label="Adiado" color="error" size="small" />
+	                                  ) : match.status === 'cancelled' ? (
+	                                    <Chip label="Cancelado" color="error" size="small" />
+	                                  ) : (
+	                                    <Chip label="Agendado" variant="outlined" size="small" />
+	                                  )}
+	                                </TableCell>
+	                                <TableCell align="center">
+	                                  <Stack direction="row" spacing={1} justifyContent="center">
+	                                    {match.status === 'score_pending_review' && (
+	                                      <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />} onClick={() => handleConfirmScore(match.id)}>
+	                                        Confirmar
+	                                      </Button>
+	                                    )}
+	                                    <Select
+	                                      size="small"
+	                                      value={match.status}
+	                                      onChange={(e) => handleStatusChange(match.id, e.target.value)}
+	                                      sx={{ height: 30, fontSize: '0.75rem', minWidth: 120 }}
+	                                    >
+	                                      <MenuItem value="scheduled">Agendado</MenuItem>
+	                                      <MenuItem value="postponed">Adiado</MenuItem>
+	                                      <MenuItem value="cancelled">Cancelado</MenuItem>
+	                                    </Select>
+	                                  </Stack>
+	                                </TableCell>
+	                              </TableRow>
+	                            )
+	                          })}
+	                        </TableBody>
+	                      </Table>
+	                    </TableContainer>
+	                        </>
+	                      )
+	                    })()}
+	                  </CardContent>
+	                </Card>
+	              ))}
+	            </Stack>
+	          )}
+	        </Stack>
+	      )}
 
       {/* ==========================================
           TAB 1: INTEGRATION / SYNC
@@ -1151,10 +1312,11 @@ export default function AdminPanel() {
                 <TableRow>
                   <TableCell>Participante</TableCell>
                   <TableCell>E-mail</TableCell>
-                  <TableCell align="center">Função Administrativa</TableCell>
-                  <TableCell align="center">Acesso Ativo</TableCell>
-                  <TableCell align="center">Data Registro</TableCell>
-                </TableRow>
+	                  <TableCell align="center">Função Administrativa</TableCell>
+	                  <TableCell align="center">Acesso Ativo</TableCell>
+	                  <TableCell align="center">Data Registro</TableCell>
+	                  <TableCell align="center">Ações</TableCell>
+	                </TableRow>
               </TableHead>
               <TableBody>
                 {filteredUsers.map(u => (
@@ -1187,17 +1349,28 @@ export default function AdminPanel() {
                           onChange={() => handleToggleUserActive(u.id, u.is_active)}
                         />
                         <Chip
-                          label={u.is_active ? 'Ativo' : 'Pendente/Inativo'}
+                          label={u.is_active ? 'Ativo' : 'Inativo'}
                           color={u.is_active ? 'success' : 'warning'}
                           size="small"
                           variant={u.is_active ? 'filled' : 'outlined'}
                         />
                       </Stack>
                     </TableCell>
-                    <TableCell align="center">
-                      {new Date(u.created_at).toLocaleDateString('pt-BR')}
-                    </TableCell>
-                  </TableRow>
+	                    <TableCell align="center">
+	                      {new Date(u.created_at).toLocaleDateString('pt-BR')}
+	                    </TableCell>
+	                    <TableCell align="center">
+	                      <Button
+	                        size="small"
+	                        variant="outlined"
+	                        color="error"
+	                        disabled={u.id === user.id}
+	                        onClick={() => handleOpenDeleteUserDialog(u)}
+	                      >
+	                        Remover
+	                      </Button>
+	                    </TableCell>
+	                  </TableRow>
                 ))}
               </TableBody>
             </Table>
@@ -1455,10 +1628,10 @@ export default function AdminPanel() {
               <Stack spacing={2}>
                 <Box>
                   <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
-                    Link oculto para cadastro com aprovação
+                    Link oculto para cadastro direto
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Cadastros feitos por este link entram desativados e precisam ser aprovados em Usuários & Acessos.
+                    Cadastros feitos por este link entram ativos por padrão. O acesso pode ser desativado em Usuários & Acessos.
                   </Typography>
                 </Box>
                 <TextField
@@ -1617,6 +1790,24 @@ export default function AdminPanel() {
         <DialogActions>
           <Button onClick={() => setRejectDialogOpen(false)}>Cancelar</Button>
           <Button onClick={handleConfirmRejectPayment} variant="contained" color="error">Recusar Pagamento</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteUserDialogOpen} onClose={() => setDeleteUserDialogOpen(false)}>
+        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 'bold' }}>Remover Usuário</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1, minWidth: 360 }}>
+            <Alert severity="warning" sx={{ borderRadius: 2 }}>
+              Esta ação remove o usuário e seus dados relacionados, como palpites e participação em grupos.
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              Confirme a remoção de <strong>{deleteUserTarget?.display_name}</strong> (@{deleteUserTarget?.username}).
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteUserDialogOpen(false)}>Cancelar</Button>
+          <Button onClick={handleConfirmDeleteUser} variant="contained" color="error">Remover Usuário</Button>
         </DialogActions>
       </Dialog>
     </Box>

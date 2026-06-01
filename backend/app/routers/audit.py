@@ -10,6 +10,7 @@ from ..models import AuditBlock, Match, Prediction
 from ..schemas import AuditBlockResponse
 from ..auth import get_current_active_user
 from ..settings import get_locked_match_cutoff, is_match_locked_for_predictions
+from ..github_audit import get_audit_repository_url, github_audit_enabled, publish_audit_block_best_effort
 
 router = APIRouter(prefix="/api/audit", tags=["Cryptographic Audit"])
 
@@ -79,7 +80,17 @@ def get_or_create_audit_block(db: Session, match_id: int) -> AuditBlock:
     db.add(db_block)
     db.commit()
     db.refresh(db_block)
+    publish_audit_block_best_effort(db_block)
     return db_block
+
+@router.get("/github")
+def get_github_audit_config(
+    current_user = Depends(get_current_active_user)
+):
+    return {
+        "enabled": github_audit_enabled(),
+        "repository_url": get_audit_repository_url()
+    }
 
 @router.get("/blocks", response_model=List[AuditBlockResponse])
 def get_all_audit_blocks(

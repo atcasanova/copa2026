@@ -2,6 +2,9 @@ import os
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["JWT_SECRET"] = "test_secret_key"
 os.environ["TESTING"] = "true"
+os.environ["PAYMENT_APPROVAL_NOTIFY_ENABLED"] = "false"
+os.environ["WHATSAPP_NOTIFY_ENABLED"] = "false"
+os.environ["GITHUB_AUDIT"] = "false"
 
 import pytest
 from sqlalchemy import create_engine

@@ -18,6 +18,14 @@ export default function Rules() {
   const [summary, setSummary] = useState(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
   const [predictionLockHours, setPredictionLockHours] = useState(3)
+  const [multipliers, setMultipliers] = useState([
+    { stage: 'Group Stage', multiplier: 1.0 },
+    { stage: 'Round of 32', multiplier: 2.0 },
+    { stage: 'Round of 16', multiplier: 3.0 },
+    { stage: 'Quarter-finals', multiplier: 4.0 },
+    { stage: 'Semi-finals', multiplier: 5.0 },
+    { stage: 'Final', multiplier: 6.0 }
+  ])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -28,6 +36,9 @@ export default function Rules() {
         ])
         setSummary(summaryRes.data)
         setPredictionLockHours(settingsRes.data.prediction_lock_hours ?? 3)
+        if (Array.isArray(settingsRes.data.multipliers) && settingsRes.data.multipliers.length > 0) {
+          setMultipliers(settingsRes.data.multipliers)
+        }
       } catch (err) {
         console.error("Erro ao carregar dados do rateio:", err)
       } finally {
@@ -39,6 +50,18 @@ export default function Rules() {
 
   const formatLockHours = (hours) => {
     return Number(hours) === 1 ? '1 hora' : `${hours} horas`
+  }
+
+  const getStageLabel = (stage) => {
+    const labels = {
+      'Group Stage': 'Fase de Grupos',
+      'Round of 32': 'Fase de 32 (Dezesseis-avos)',
+      'Round of 16': 'Oitavas de Final',
+      'Quarter-finals': 'Quartas de Final',
+      'Semi-finals': 'Semifinais',
+      'Final': 'Disputa de Terceiro Lugar & Final'
+    }
+    return labels[stage] || stage
   }
 
   return (
@@ -219,29 +242,19 @@ export default function Rules() {
                 </Typography>
 
                 <List disablePadding>
-                  <ListItem sx={{ py: 0.75, px: 0 }}>
-                    <ListItemText primary="Fase de Grupos" secondary="Multiplicador 1.0x" primaryTypographyProps={{ fontWeight: 600 }} secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }} />
-                  </ListItem>
-                  <Divider />
-                  <ListItem sx={{ py: 0.75, px: 0 }}>
-                    <ListItemText primary="Fase de 32 (Dezesseis-avos)" secondary="Multiplicador 2.0x" primaryTypographyProps={{ fontWeight: 600 }} secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }} />
-                  </ListItem>
-                  <Divider />
-                  <ListItem sx={{ py: 0.75, px: 0 }}>
-                    <ListItemText primary="Oitavas de Final" secondary="Multiplicador 3.0x" primaryTypographyProps={{ fontWeight: 600 }} secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }} />
-                  </ListItem>
-                  <Divider />
-                  <ListItem sx={{ py: 0.75, px: 0 }}>
-                    <ListItemText primary="Quartas de Final" secondary="Multiplicador 4.0x" primaryTypographyProps={{ fontWeight: 600 }} secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }} />
-                  </ListItem>
-                  <Divider />
-                  <ListItem sx={{ py: 0.75, px: 0 }}>
-                    <ListItemText primary="Semifinais" secondary="Multiplicador 5.0x" primaryTypographyProps={{ fontWeight: 600 }} secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }} />
-                  </ListItem>
-                  <Divider />
-                  <ListItem sx={{ py: 0.75, px: 0 }}>
-                    <ListItemText primary="Disputa de Terceiro Lugar & Final" secondary="Multiplicador 6.0x" primaryTypographyProps={{ fontWeight: 600 }} secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }} />
-                  </ListItem>
+                  {multipliers.map((item, idx) => (
+                    <React.Fragment key={item.stage}>
+                      <ListItem sx={{ py: 0.75, px: 0 }}>
+                        <ListItemText
+                          primary={getStageLabel(item.stage)}
+                          secondary={`Multiplicador ${Number(item.multiplier).toFixed(1)}x`}
+                          primaryTypographyProps={{ fontWeight: 600 }}
+                          secondaryTypographyProps={{ color: 'secondary.main', fontWeight: 'bold' }}
+                        />
+                      </ListItem>
+                      {idx < multipliers.length - 1 && <Divider />}
+                    </React.Fragment>
+                  ))}
                 </List>
               </CardContent>
             </Card>

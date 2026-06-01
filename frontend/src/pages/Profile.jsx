@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { Box, Card, CardContent, Grid, TextField, Button, Typography, FormControlLabel, Checkbox, Stack, Alert, Snackbar, CircularProgress, Divider } from '@mui/material'
-import { ContentCopy as CopyIcon, CheckCircle as ApprovedIcon, HourglassEmpty as PendingIcon, Cancel as RejectedIcon, UploadFile as UploadIcon } from '@mui/icons-material'
+import {
+  ContentCopy as CopyIcon,
+  CheckCircle as ApprovedIcon,
+  HourglassEmpty as PendingIcon,
+  Cancel as RejectedIcon,
+  UploadFile as UploadIcon,
+  Chat as ChatIcon
+} from '@mui/icons-material'
 import { useAuth } from '../App'
 import axios from 'axios'
 
@@ -31,6 +38,7 @@ export default function Profile() {
   const [uploadSuccess, setUploadSuccess] = useState('')
   const [uploading, setUploading] = useState(false)
   const [loadingPix, setLoadingPix] = useState(true)
+  const [whatsappGroupChat, setWhatsappGroupChat] = useState('')
 
   const loadPixData = async () => {
     if (authLoading) return
@@ -62,6 +70,14 @@ export default function Profile() {
 
   useEffect(() => {
     loadPixData()
+  }, [authLoading, token])
+
+  useEffect(() => {
+    if (authLoading || !token) return
+
+    axios.get('/api/auth/profile-config')
+      .then(res => setWhatsappGroupChat(res.data?.whatsapp_group_chat || ''))
+      .catch(() => setWhatsappGroupChat(''))
   }, [authLoading, token])
 
   const handleCopyCopiaCola = () => {
@@ -286,6 +302,31 @@ export default function Profile() {
         {/* Right Side: Password Update & Payment Verification */}
         <Grid item xs={12} md={5}>
           <Stack spacing={3}>
+            {whatsappGroupChat && (
+              <Card sx={{ border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                <CardContent sx={{ p: 4 }}>
+                  <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <ChatIcon color="primary" /> Grupo do Bolão
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.6 }}>
+                    Entre no grupo oficial do Bolão no WhatsApp para acompanhar avisos, lembretes e conversas com os participantes.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<ChatIcon />}
+                    href={whatsappGroupChat}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    fullWidth
+                    sx={{ textTransform: 'none', borderRadius: 2 }}
+                  >
+                    Entrar no grupo do WhatsApp
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Alterar Senha */}
             <Card>
               <CardContent sx={{ p: 4 }}>

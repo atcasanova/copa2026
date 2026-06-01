@@ -16,6 +16,8 @@ def list_matches(
     team: Optional[str] = None,
     ground: Optional[str] = None,
     status: Optional[str] = None,
+    missing_score: bool = False,
+    limit: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -37,11 +39,16 @@ def list_matches(
         query = query.filter(Match.ground == ground)
     if status:
         query = query.filter(Match.status == status)
+    if missing_score:
+        query = query.filter(Match.score_ft_team1 == None, Match.score_ft_team2 == None)
     if team:
         query = query.filter(or_(Match.team1_name == team, Match.team2_name == team))
         
     # Sort matches by kickoff time
-    return query.order_by(Match.kickoff_time.asc()).all()
+    query = query.order_by(Match.kickoff_time.asc())
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 @router.get("", response_model=List[MatchResponse], include_in_schema=False)
 def get_matches_without_trailing_slash(
@@ -51,10 +58,12 @@ def get_matches_without_trailing_slash(
     team: Optional[str] = None,
     ground: Optional[str] = None,
     status: Optional[str] = None,
+    missing_score: bool = False,
+    limit: Optional[int] = Query(None, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    return list_matches(date, stage, group_name, team, ground, status, db, current_user)
+    return list_matches(date, stage, group_name, team, ground, status, missing_score, limit, db, current_user)
 
 @router.get("/", response_model=List[MatchResponse])
 def get_matches(
@@ -64,10 +73,12 @@ def get_matches(
     team: Optional[str] = None,
     ground: Optional[str] = None,
     status: Optional[str] = None,
+    missing_score: bool = False,
+    limit: Optional[int] = Query(None, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    return list_matches(date, stage, group_name, team, ground, status, db, current_user)
+    return list_matches(date, stage, group_name, team, ground, status, missing_score, limit, db, current_user)
 
 @router.get("/{match_id}", response_model=MatchResponse)
 def get_match_detail(

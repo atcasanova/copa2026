@@ -2,19 +2,24 @@ import React, { useState, useEffect } from 'react'
 import {
   Box, Card, CardContent, Typography, Grid, MenuItem, Select, FormControl,
   InputLabel, FormControlLabel, Checkbox, Button, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Paper, TextField, IconButton, Alert, Tooltip, Stack, Chip, Tabs, Tab
+  TableContainer, TableHead, TableRow, Paper, TextField, IconButton, Alert, Tooltip, Stack, Chip, Tabs, Tab,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material'
 import {
   Lock as LockIcon,
   Save as SaveIcon,
   CheckCircle as CheckIcon,
   HourglassEmpty as PendingIcon,
-  ErrorOutline as WarningIcon
+  ErrorOutline as WarningIcon,
+  Article as ReportIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
+import GroupStandingsTable from '../components/GroupStandingsTable'
+import { getFlagUrl } from '../utils/flags'
+import { getGroupStandings, getActualScore, getPredictionScore } from '../utils/standings'
 
-const getFlagUrl = (emoji) => {
+const getFlagUrlLegacy = (emoji) => {
   if (!emoji || emoji === '🏳️') return null
 
   // Handle exceptions for England and Scotland flags (subnational entities)
@@ -47,6 +52,11 @@ const getFlagUrl = (emoji) => {
   return null
 }
 
+const formatGroupName = (groupName) => {
+  if (!groupName) return ''
+  return groupName.toLowerCase().startsWith('group ') ? groupName.replace(/^group\s+/i, '') : groupName
+}
+
 export default function Predictions() {
   const { user } = useAuth()
   
@@ -67,6 +77,11 @@ export default function Predictions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [predictionLockHours, setPredictionLockHours] = useState(3)
+  const [predictionListOpen, setPredictionListOpen] = useState(false)
+  const [predictionListMatch, setPredictionListMatch] = useState(null)
+  const [predictionListData, setPredictionListData] = useState(null)
+  const [predictionListLoading, setPredictionListLoading] = useState(false)
+  const [predictionListError, setPredictionListError] = useState('')
 
   const autoSelectPage = (loadedMatches, mode) => {
     if (!loadedMatches || loadedMatches.length === 0) return;
@@ -239,6 +254,43 @@ export default function Predictions() {
     return now < lockTime && lockTime <= warningTime
   }
 
+  const handleOpenPredictionList = async (match) => {
+    setPredictionListMatch(match)
+    setPredictionListOpen(true)
+    setPredictionListData(null)
+    setPredictionListError('')
+    setPredictionListLoading(true)
+
+    try {
+      const res = await axios.get(`/api/predictions/match/${match.id}/visibility`)
+      setPredictionListData(res.data)
+    } catch (err) {
+      setPredictionListError('Não foi possível carregar a lista de palpites desta partida.')
+    } finally {
+      setPredictionListLoading(false)
+    }
+  }
+
+  const handleClosePredictionList = () => {
+    setPredictionListOpen(false)
+    setPredictionListMatch(null)
+    setPredictionListData(null)
+    setPredictionListError('')
+  }
+
+  const renderPredictionListButton = (match, locked) => (
+    <Tooltip title={locked ? 'Ver palpites realizados neste jogo' : 'Ver quem já palpitou neste jogo'}>
+      <IconButton
+        size="small"
+        color="primary"
+        onClick={() => handleOpenPredictionList(match)}
+        aria-label={locked ? 'Ver palpites realizados neste jogo' : 'Ver quem já palpitou neste jogo'}
+      >
+        <ReportIcon fontSize="small" />
+      </IconButton>
+    </Tooltip>
+  )
+
   const formatDateTime = (isoString) => {
     const d = new Date(isoString)
     const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'America/Sao_Paulo' })
@@ -262,7 +314,7 @@ export default function Predictions() {
   const groupsInMatches = [...new Set(matches.filter(m => m.group_name).map(m => m.group_name))].sort()
   const knockoutStagesInMatches = [...new Set(matches.filter(m => !m.group_name).map(m => m.stage))]
   const groupPages = [
-    ...groupsInMatches.map(g => ({ type: 'group', value: g, label: `Grupo ${g}` })),
+    ...groupsInMatches.map(g => ({ type: 'group', value: g, label: `Grupo ${formatGroupName(g)}` })),
     ...knockoutStagesInMatches.map(s => {
       let label = s;
       if (s === 'Round of 32') label = '16-avos';
@@ -308,6 +360,45 @@ export default function Predictions() {
     }
     return true
   })
+
+  const activeGroupPage = groupingMode === 'group' ? groupPages[safePageIndex] : null
+  const activeGroupName = activeGroupPage?.type === 'group' ? activeGroupPage.value : null
+  const expectationGroup = activeGroupName ? getGroupStandings(matches, activeGroupName, getPredictionScore(predictions)) : null
+  const realityGroup = activeGroupName ? getGroupStandings(matches, activeGroupName, getActualScore) : null
+
+  const renderGroupComparison = () => {
+    if (!activeGroupName || !expectationGroup || !realityGroup) return null
+
+    return (
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 2 }}>
+          Grupo {formatGroupName(activeGroupName)}: Expectativa x Realidade
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent sx={{ p: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
+                  Expectativa
+                </Typography>
+                <GroupStandingsTable standings={expectationGroup.standings} dense />
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent sx={{ p: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
+                  Realidade
+                </Typography>
+                <GroupStandingsTable standings={realityGroup.standings} dense />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      </Box>
+    )
+  }
 
   return (
     <Box sx={{ mt: 1 }}>
@@ -482,6 +573,9 @@ export default function Predictions() {
                         <Typography variant="caption" color="text.secondary">
                           📍 {match.ground}
                         </Typography>
+                        <Box sx={{ mt: 0.5 }}>
+                          {renderPredictionListButton(match, locked)}
+                        </Box>
                       </TableCell>
 
                       {/* Date/Time */}
@@ -512,8 +606,8 @@ export default function Predictions() {
                       {/* Team A */}
                       <TableCell align="right" sx={{ fontWeight: 700, fontSize: '1rem' }}>
                         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                          {getFlagUrl(match.team1?.flag_icon) ? (
-                            <img src={getFlagUrl(match.team1.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                          {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
+                            <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
                           ) : (
                             <span>{match.team1?.flag_icon}</span>
                           )}
@@ -571,8 +665,8 @@ export default function Predictions() {
                       <TableCell align="left" sx={{ fontWeight: 700, fontSize: '1rem' }}>
                         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
                           {match.team2_name}
-                          {getFlagUrl(match.team2?.flag_icon) ? (
-                            <img src={getFlagUrl(match.team2.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                          {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
+                            <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
                           ) : (
                             <span>{match.team2?.flag_icon}</span>
                           )}
@@ -634,6 +728,7 @@ export default function Predictions() {
             </TableBody>
           </Table>
         </TableContainer>
+        {renderGroupComparison()}
       </Box>
 
       {/* Mobile Stacked Card View */}
@@ -677,15 +772,18 @@ export default function Predictions() {
                           {formatDateTime(match.kickoff_time)}
                         </Typography>
                       </Box>
-                      {soon && !locked && (
-                        <Chip label="Bloqueia logo" color="warning" size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
-                      )}
-                      {locked && !isFinished && (
-                        <Chip icon={<LockIcon sx={{ fontSize: '0.8rem !important' }} />} label="Bloqueado" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />
-                      )}
-                      {isFinished && (
-                        <Chip label="Encerrado" size="small" color="default" variant="outlined" sx={{ fontSize: '0.65rem', height: 18, color: 'text.secondary', borderColor: 'divider' }} />
-                      )}
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        {renderPredictionListButton(match, locked)}
+                        {soon && !locked && (
+                          <Chip label="Bloqueia logo" color="warning" size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
+                        )}
+                        {locked && !isFinished && (
+                          <Chip icon={<LockIcon sx={{ fontSize: '0.8rem !important' }} />} label="Bloqueado" size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />
+                        )}
+                        {isFinished && (
+                          <Chip label="Encerrado" size="small" color="default" variant="outlined" sx={{ fontSize: '0.65rem', height: 18, color: 'text.secondary', borderColor: 'divider' }} />
+                        )}
+                      </Stack>
                     </Box>
 
                     {/* Match Row */}
@@ -695,8 +793,8 @@ export default function Predictions() {
                         <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {match.team1?.fifa_code || match.team1_name}
                         </Typography>
-                        {getFlagUrl(match.team1?.flag_icon) ? (
-                          <img src={getFlagUrl(match.team1.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
+                        {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
+                          <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
                         ) : (
                           <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team1?.flag_icon}</span>
                         )}
@@ -748,8 +846,8 @@ export default function Predictions() {
 
                       {/* Team B */}
                       <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-start' }}>
-                        {getFlagUrl(match.team2?.flag_icon) ? (
-                          <img src={getFlagUrl(match.team2.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
+                        {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
+                          <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
                         ) : (
                           <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team2?.flag_icon}</span>
                         )}
@@ -816,7 +914,92 @@ export default function Predictions() {
             })}
           </Stack>
         )}
+        {renderGroupComparison()}
       </Box>
+
+      <Dialog open={predictionListOpen} onClose={handleClosePredictionList} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 800 }}>
+          {predictionListData?.is_locked ? 'Palpites realizados' : 'Participantes que já palpitaram'}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {predictionListMatch && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                  {predictionListMatch.team1_name} x {predictionListMatch.team2_name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {formatDateTime(predictionListMatch.kickoff_time)}
+                </Typography>
+              </Box>
+            )}
+
+            {predictionListLoading && (
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                Carregando lista...
+              </Alert>
+            )}
+
+            {predictionListError && (
+              <Alert severity="error" sx={{ borderRadius: 2 }}>
+                {predictionListError}
+              </Alert>
+            )}
+
+            {predictionListData && !predictionListLoading && !predictionListError && (
+              predictionListData.entries.length === 0 ? (
+                <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  Nenhum participante registrou palpite para este jogo ainda.
+                </Alert>
+              ) : (
+                <TableContainer component={Paper} sx={{ boxShadow: 'none' }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Participante</TableCell>
+                        {predictionListData.is_locked && <TableCell align="center">Palpite</TableCell>}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {predictionListData.entries.map(entry => (
+                        <TableRow key={entry.user_id}>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              {entry.display_name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Enviado em {formatDateTime(entry.created_at)}
+                            </Typography>
+                          </TableCell>
+                          {predictionListData.is_locked && (
+                            <TableCell align="center">
+                              <Chip
+                                label={`${entry.goals_team1} x ${entry.goals_team2}`}
+                                color="primary"
+                                variant="outlined"
+                                size="small"
+                                sx={{ fontWeight: 800, fontFamily: 'Outfit' }}
+                              />
+                              {entry.qualified_team_name && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                  Classifica: {entry.qualified_team_name}
+                                </Typography>
+                              )}
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClosePredictionList}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

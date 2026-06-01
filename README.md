@@ -9,7 +9,7 @@ Este projeto consiste em um sistema completo de Bolão para a Copa do Mundo FIFA
 - **Backend**: Python FastAPI com SQLAlchemy ORM, Pydantic para validação, e APScheduler rodando em segundo plano.
 - **Frontend**: React (Vite) integrado à biblioteca de componentes Material-UI (MUI v5) para interface responsiva, com suporte a hot-reload (HMR) e temas escuros (Dark Mode).
 - **Banco de Dados**: PostgreSQL 15 rodando sob Docker Compose.
-- **Background Jobs**: Agendador APScheduler interno configurado para executar a sincronização automática diária às 01:00 AM (America/Sao_Paulo).
+- **Background Jobs**: Agendador APScheduler interno configurado para executar a sincronização automática diária às 01:00 AM (America/Sao_Paulo) e lembretes de palpites a cada 5 minutos.
 - **Ambiente**: Orquestração completa de contêineres via Docker Compose.
 
 ---
@@ -24,15 +24,18 @@ Para executar o projeto localmente, é necessário ter instalado em sua máquina
 
 ## Como Executar o Projeto
 
-1. Certifique-se de ter os arquivos `.env` e `docker-compose.yml` preenchidos na raiz do projeto (ambos já vêm pré-configurados para desenvolvimento local).
+1. Copie o arquivo de exemplo e ajuste os valores sensíveis:
+   ```bash
+   cp .env.example .env
+   ```
 2. Na pasta raiz do projeto (`Bolao/`), execute o comando para compilar e iniciar os contêineres:
    ```bash
    docker-compose up --build -d
    ```
 3. O Docker Compose iniciará três serviços:
-   - **Banco de Dados**: Porta `5432` (PostgreSQL)
-   - **Backend**: Porta `8000` (FastAPI + Documentação OpenAPI no endereço `http://localhost:8000/docs`)
-   - **Frontend**: Porta `3000` (Interface Web do Bolão acessível em `http://localhost:3000`)
+   - **Banco de Dados**: PostgreSQL acessível apenas pela rede Docker interna.
+   - **Backend**: publicado localmente em `http://127.0.0.1:3998` (OpenAPI em `http://127.0.0.1:3998/docs`).
+   - **Frontend**: publicado localmente em `http://127.0.0.1:3999`.
 
 ---
 
@@ -47,15 +50,32 @@ O arquivo `.env` gerencia as configurações cruciais e credenciais de seguranç
 | `POSTGRES_PASSWORD` | Senha de acesso ao banco PostgreSQL | `bolao_secure_password_2026` |
 | `POSTGRES_DB` | Nome do banco de dados | `bolao_db` |
 | `DATABASE_URL` | String de conexão para o SQLAlchemy | `postgresql://bolao_user:password@db:5432/bolao_db` |
-| `JWT_SECRET` | Chave secreta de codificação dos tokens JWT | `super_secret_jwt_key_world_cup_2026_change_me` |
+| `JWT_SECRET` | Chave secreta de codificação dos tokens JWT | `change_me_with_a_strong_random_secret` |
 | `JWT_ALGORITHM` | Algoritmo de assinatura dos tokens JWT | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Expiração da sessão do usuário (em minutos) | `1440` (24 horas) |
+| `CORS_ORIGINS` | Origens permitidas para chamadas ao backend | `http://localhost:3999` |
+| `FRONTEND_URL` | URL pública do frontend usada em links de reset de senha | `https://bolao.example.com` |
+| `ENABLE_ADMIN_BOOTSTRAP` | Habilita criação do admin inicial no startup | `true` na primeira execução |
 | `ADMIN_BOOTSTRAP_USERNAME` | Nome do usuário do primeiro administrador | `admin` |
 | `ADMIN_BOOTSTRAP_EMAIL` | E-mail do usuário administrador inicial | `admin@bolao2026.com.br` |
 | `ADMIN_BOOTSTRAP_PASSWORD` | Senha de login do usuário administrador | `AdminSecurePassword2026!` |
 | `TEAMS_JSON_URL` | Link JSON dos times do openfootball | *(URL Raw GitHub)* |
 | `STADIUMS_JSON_URL` | Link JSON dos estádios do openfootball | *(URL Raw GitHub)* |
 | `MATCHES_JSON_URL` | Link JSON das partidas do openfootball | *(URL Raw GitHub)* |
+| `SMTP_HOST` / `SMTP_PORT` | Servidor SMTP para reset de senha | `mail.example.internal` / `25` |
+| `SMTP_STARTTLS` | Habilita STARTTLS no SMTP | `false` |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | Credenciais SMTP, se necessárias | vazio |
+| `SMTP_FROM` | Remetente dos e-mails do sistema | `bolao@example.com` |
+| `WHATSAPP_NOTIFY_ENABLED` | Habilita mensagens via API interna de WhatsApp | `false` |
+| `WHATSAPP_NOTIFY_URL` | Endpoint de envio da API de WhatsApp | `http://whatsgo-bot-1:9999/internal/v1/send` |
+| `WHATSAPP_NOTIFY_TOKEN` | Bearer token da API interna de WhatsApp | `change_me_whatsapp_internal_api_token` |
+| `WHATSAPP_NOTIFY_TO` | ID do grupo/contato de destino | `120363000000000000@g.us` |
+| `WHATSAPP_NOTIFY_SEND_AS` | Formato de envio da API de WhatsApp | `text` |
+| `WHATSAPP_NOTIFY_TIMEOUT_SECONDS` | Timeout do envio em segundos | `5` |
+| `WHATSAPP_GROUP_CHAT` | Link do grupo de WhatsApp exibido no perfil dos participantes | `https://chat.whatsapp.com/change_me_invite_code` |
+| `GITHUB_AUDIT` | Habilita publicação dos blocos de auditoria dos palpites no GitHub | `false` |
+| `GITHUB_REPO` | Repositório usado apenas para os blocos de auditoria | `git@github.com:seu-usuario/palpites-copa-2026-auditoria.git` |
+| `GITHUB_TOKEN` | Token do GitHub com permissão de leitura/escrita em Contents no repositório | `change_me_github_token_with_contents_write` |
 
 ---
 
@@ -83,7 +103,42 @@ No primeiro boot do contêiner backend:
 - O job baixa a versão mais atualizada dos confrontos e compara com os registros locais.
 - Se o placar de uma partida estiver marcado como **confirmado por um administrador** (`score_confirmed_by_admin = True`), a sincronização **NÃO** alterará o placar local. Em vez disso, salvará um alerta na tabela de diferenças (Diffs) exibido no menu administrativo, aguardando aprovação humana para evitar fraudes ou perdas.
 - Se o placar local não estiver confirmado ou for nulo, a sincronização atualiza as informações e dispara automaticamente o **Recálculo de Notas e Classificações**.
-- Quando a sincronização encontra os confrontos de mata-mata definidos (substituindo placeholders como "Winner Group A" por times reais como "Mexico"), ela atualiza o confronto e destrava os palpites dos usuários, caso a regra de bloqueio de 3 horas ainda não tenha expirado.
+- Quando a sincronização encontra os confrontos de mata-mata definidos (substituindo placeholders como "Winner Group A" por times reais como "Mexico"), ela atualiza o confronto e destrava os palpites dos usuários, caso a regra de bloqueio configurada no painel administrativo ainda não tenha expirado.
+
+---
+
+## Notificações via WhatsApp
+
+O backend pode enviar mensagens para uma API interna de WhatsApp configurada pelas variáveis `WHATSAPP_NOTIFY_*`.
+
+Eventos enviados:
+- Aprovação de pagamento: informa que o pagamento do participante foi aprovado.
+- Lembretes de palpites: enviados 2h30 antes de cada horário de jogos, com a lista das partidas daquele horário.
+- Ranking atualizado: enviado quando placares são salvos pelo administrador, com top 10 geral e medalhas nos três primeiros.
+
+Recomendação de Docker:
+- Se a API de WhatsApp estiver em outro Compose no mesmo host, conecte o `bolao_backend` à mesma rede Docker dessa API e use o nome do serviço na URL, por exemplo `http://whatsgo-bot-1:9999/internal/v1/send`.
+- Alternativamente, publique a API no host com `ports: ["9998:9999"]` e use `http://host.docker.internal:9998/internal/v1/send`, mantendo o `extra_hosts` já configurado no backend.
+
+---
+
+## Auditoria Externa no GitHub
+
+Além da cadeia criptográfica gravada no banco, o backend pode publicar cada bloco de auditoria em um repositório GitHub dedicado exclusivamente aos palpites. O repositório configurado para produção é:
+
+`git@github.com:atcasanova/palpites-copa-2026-auditoria.git`
+
+Quando `GITHUB_AUDIT=true`, cada bloco gerado após o bloqueio de uma partida é enviado para `blocks/block_XXXXXX_match_YY.json` por meio da API de Contents do GitHub. O arquivo contém partida, payload dos palpites, hash anterior, hash atual e instruções de verificação. A publicação é feita em modo best-effort: se o GitHub estiver indisponível ou o token estiver inválido, o bloco local continua sendo criado e a falha fica registrada no log do backend.
+
+Configure:
+
+```env
+GITHUB_AUDIT=true
+GITHUB_REPO=git@github.com:atcasanova/palpites-copa-2026-auditoria.git
+GITHUB_TOKEN=SEU_TOKEN_COM_CONTENTS_READ_WRITE
+```
+
+O token nunca deve ser commitado. A tela **Auditoria Criptográfica** exibe o link do repositório para validação pública.
 
 ---
 

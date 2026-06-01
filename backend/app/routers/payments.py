@@ -12,6 +12,7 @@ from ..db import get_db
 from ..models import User, PixConfig, AuditLog
 from ..schemas import PixConfigResponse, PixConfigUpdate, UserResponse
 from ..auth import get_current_active_user
+from ..notifications import send_payment_approval_notification
 
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
 
@@ -412,6 +413,7 @@ def admin_approve_payment(
     )
     db.add(audit)
     db.commit()
+    send_payment_approval_notification(user)
     
     return user
 

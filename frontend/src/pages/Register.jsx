@@ -90,11 +90,9 @@ export default function Register() {
         password
       })
       setSuccess(true)
-      if (inviteCode) {
-        setTimeout(() => {
-          navigate('/login')
-        }, 2500)
-      }
+      setTimeout(() => {
+        navigate('/login')
+      }, 2500)
     } catch (err) {
       setError(err.response?.data?.detail || 'Erro ao realizar cadastro. Tente outro nome de usuário ou e-mail.')
     } finally {
@@ -122,7 +120,7 @@ export default function Register() {
                 Criar Nova Conta
               </Typography>
               <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
-              {registrationCode ? 'Complete seu cadastro. Seu acesso será liberado após aprovação.' : 'Complete seu cadastro usando o convite recebido por e-mail.'}
+              {registrationCode ? 'Complete seu cadastro para acessar o bolão.' : 'Complete seu cadastro usando o convite recebido por e-mail.'}
               </Typography>
             </Box>
 
@@ -146,7 +144,7 @@ export default function Register() {
 
             {success && (
               <Alert severity="success" sx={{ width: '100%', borderRadius: 2 }}>
-                Cadastro realizado com sucesso! {registrationCode ? 'Aguarde a aprovação do administrador para acessar.' : 'Redirecionando para login...'}
+                Cadastro realizado com sucesso! Redirecionando para login...
               </Alert>
             )}
 

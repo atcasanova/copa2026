@@ -1,11 +1,12 @@
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
 from ..db import get_db
 from ..models import Group, GroupMember, GroupInvitation, User, AuditLog, Match, Prediction
-from ..schemas import GroupCreate, GroupResponse, GroupDetailResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate
+from ..schemas import GroupCreate, GroupResponse, GroupDetailResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate, UserPublicResponse
 from ..auth import get_current_active_user
 from ..settings import get_locked_match_cutoff
 import io
@@ -255,9 +256,15 @@ def invite_user(
     if not check_group_admin(db, group_id, current_user.id):
         raise HTTPException(status_code=403, detail="Apenas administradores do grupo podem enviar convites.")
         
-    # Find user by username or email
+    # Find user by username or email. A leading @ is accepted for manual username input.
+    invitee_identifier = invite_in.invitee_identifier.strip()
+    invitee_username = invitee_identifier.lstrip("@")
     invitee = db.query(User).filter(
-        (User.username == invite_in.invitee_identifier) | (User.email == invite_in.invitee_identifier)
+        or_(
+            User.username.ilike(invitee_username),
+            User.email.ilike(invitee_identifier),
+            User.display_name.ilike(invitee_identifier)
+        )
     ).first()
     
     # If user doesn't exist, we can register an email-only invite, but in this version we restrict to existing users.
@@ -303,6 +310,48 @@ def invite_user(
     db.refresh(new_invite)
     
     return new_invite
+
+@router.get("/{group_id}/invite-candidates", response_model=List[UserPublicResponse])
+def search_group_invite_candidates(
+    group_id: UUID,
+    q: str = Query(..., min_length=2, max_length=80),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Grupo não encontrado.")
+
+    if not check_group_admin(db, group_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Apenas administradores do grupo podem buscar participantes.")
+
+    member_ids = [
+        row.user_id for row in db.query(GroupMember.user_id).filter(
+            GroupMember.group_id == group_id
+        ).all()
+    ]
+    pending_invite_ids = [
+        row.invitee_id for row in db.query(GroupInvitation.invitee_id).filter(
+            GroupInvitation.group_id == group_id,
+            GroupInvitation.status == "pending",
+            GroupInvitation.invitee_id.isnot(None)
+        ).all()
+    ]
+    excluded_ids = [*member_ids, *pending_invite_ids]
+    term = f"%{q.strip().lstrip('@')}%"
+
+    query = db.query(User).filter(
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"]),
+        or_(
+            User.username.ilike(term),
+            User.display_name.ilike(term)
+        )
+    )
+    if excluded_ids:
+        query = query.filter(~User.id.in_(excluded_ids))
+
+    return query.order_by(User.display_name.asc(), User.username.asc()).limit(10).all()
 
 @router.get("/invitations/pending", response_model=List[GroupInvitationResponse])
 def get_my_pending_invitations(

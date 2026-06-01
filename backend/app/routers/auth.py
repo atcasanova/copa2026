@@ -155,7 +155,6 @@ def register(
     
     # Enforce invitation check if user_count > 0 (bootstrap admin is exempted)
     invitation = None
-    requires_admin_approval = False
     if user_count > 0:
         if invite_code:
             invitation = db.query(SystemInvitation).filter(
@@ -179,7 +178,6 @@ def register(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Link de cadastro inválido."
                 )
-            requires_admin_approval = True
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -198,7 +196,7 @@ def register(
         hashed_password=hashed_pwd,
         role=role,
         notification_preferences={"email": True, "in_app": True},
-        is_active=not requires_admin_approval
+        is_active=True
     )
     
     db.add(new_user)
@@ -220,7 +218,8 @@ def register(
         new_value={
             "username": new_user.username,
             "role": new_user.role,
-            "requires_admin_approval": requires_admin_approval
+            "is_active": new_user.is_active,
+            "registration_method": "invitation" if invitation else "registration_link"
         }
     )
     db.add(audit)
@@ -246,7 +245,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Esta conta está inativa ou aguardando aprovação do administrador."
+            detail="Esta conta está inativa."
         )
 
     access_token = create_access_token(data={"sub": user.username, "role": user.role})
@@ -371,6 +370,15 @@ def logout(current_user: User = Depends(get_current_active_user), db: Session = 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_active_user)):
     return current_user
+
+@router.get("/profile-config")
+def get_profile_config(current_user: User = Depends(get_current_active_user)):
+    whatsapp_group_chat = os.getenv("WHATSAPP_GROUP_CHAT", "").strip()
+    if whatsapp_group_chat and whatsapp_group_chat.startswith("chat.whatsapp.com/"):
+        whatsapp_group_chat = f"https://{whatsapp_group_chat}"
+    return {
+        "whatsapp_group_chat": whatsapp_group_chat
+    }
 
 @router.put("/me", response_model=UserResponse)
 def update_profile(

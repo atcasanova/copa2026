@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from app.models import Team, Stadium, Match, Prediction, Group, GroupMember, StageMultiplier, SyncMatchDiff
+from app.models import Team, Stadium, Match, Prediction, Group, GroupMember, GroupInvitation, StageMultiplier, SyncMatchDiff
 from app.scoring import calculate_base_points, score_prediction, get_rankings
 from app.sync import parse_kickoff_to_utc, ensure_team_exists, sync_openfootball_data
 
@@ -301,6 +301,65 @@ def test_group_privacy(client, db_session, test_users):
     assert res.status_code == 403
     assert "Acesso negado" in res.json()["detail"]
 
+def test_group_invite_candidates_search_and_pending_notification(client, db_session, test_users):
+    p1 = test_users[2]
+    p2 = test_users[3]
+
+    group = Group(
+        name="Grupo Convites",
+        description="Convites por autocomplete",
+        owner_id=p1.id,
+        invite_code="AUTOCOMP",
+        is_private=True
+    )
+    db_session.add(group)
+    db_session.commit()
+
+    owner_member = GroupMember(
+        group_id=group.id,
+        user_id=p1.id,
+        role="owner",
+        is_approved=True
+    )
+    db_session.add(owner_member)
+    db_session.commit()
+
+    login_owner = client.post("/api/auth/login", data={"username": "p1_user", "password": "password"})
+    owner_headers = {"Authorization": f"Bearer {login_owner.json()['access_token']}"}
+
+    by_display_name = client.get(
+        f"/api/groups/{group.id}/invite-candidates?q=Brun",
+        headers=owner_headers
+    )
+    assert by_display_name.status_code == 200
+    assert any(candidate["username"] == p2.username for candidate in by_display_name.json())
+
+    by_username = client.get(
+        f"/api/groups/{group.id}/invite-candidates?q=p2_",
+        headers=owner_headers
+    )
+    assert by_username.status_code == 200
+    assert any(candidate["display_name"] == p2.display_name for candidate in by_username.json())
+
+    invite_res = client.post(
+        f"/api/groups/{group.id}/invite",
+        json={"invitee_identifier": p2.username},
+        headers=owner_headers
+    )
+    assert invite_res.status_code == 200
+    invite = db_session.query(GroupInvitation).filter(
+        GroupInvitation.group_id == group.id,
+        GroupInvitation.invitee_id == p2.id
+    ).first()
+    assert invite is not None
+    assert invite.status == "pending"
+
+    login_invited = client.post("/api/auth/login", data={"username": "p2_user", "password": "password"})
+    invited_headers = {"Authorization": f"Bearer {login_invited.json()['access_token']}"}
+    pending_res = client.get("/api/groups/invitations/pending", headers=invited_headers)
+    assert pending_res.status_code == 200
+    assert any(item["id"] == str(invite.id) for item in pending_res.json())
+
 # ==========================================
 # 6. Openfootball Sync Integrity Tests
 # ==========================================
@@ -548,4 +607,3 @@ def test_ranking_cache_flow(client, db_session, test_users):
 
     # Cache should be cleared (invalidated)
     assert db_session.query(RankingCache).count() == 0
-

@@ -16,8 +16,9 @@ import {
 import axios from 'axios'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import { useAuth } from '../App'
+import { getFlagUrl } from '../utils/flags'
 
-const getFlagUrl = (emoji) => {
+const getFlagUrlLegacy = (emoji) => {
   if (!emoji || emoji === '🏳️') return null
 
   // Handle exceptions for England and Scotland flags (subnational entities)
@@ -326,8 +327,8 @@ export default function Dashboard() {
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 1, sm: 2 }, flexGrow: 1, width: '100%' }}>
                         {/* Team A */}
                         <Typography variant="body1" sx={{ fontWeight: 700, minWidth: { xs: 65, sm: 120 }, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
-                          {getFlagUrl(match.team1?.flag_icon) ? (
-                            <img src={getFlagUrl(match.team1.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                          {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
+                            <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
                           ) : (
                             <span>{match.team1?.flag_icon}</span>
                           )}
@@ -367,8 +368,8 @@ export default function Dashboard() {
                           <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>
                             {match.team2?.fifa_code || match.team2_name}
                           </Box>
-                          {getFlagUrl(match.team2?.flag_icon) ? (
-                            <img src={getFlagUrl(match.team2.flag_icon)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                          {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
+                            <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
                           ) : (
                             <span>{match.team2?.flag_icon}</span>
                           )}

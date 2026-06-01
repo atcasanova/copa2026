@@ -9,6 +9,7 @@ import {
   Dashboard as DashIcon,
   SportsSoccer as SoccerIcon,
   FormatListNumbered as RankIcon,
+  TableChart as TableIcon,
   Groups as GroupsIcon,
   Person as ProfileIcon,
   AdminPanelSettings as AdminIcon,
@@ -36,6 +37,7 @@ export default function Layout() {
     { text: 'Painel Geral', icon: <DashIcon />, path: '/' },
     { text: 'Meus Palpites', icon: <SoccerIcon />, path: '/predictions' },
     { text: 'Classificação', icon: <RankIcon />, path: '/rankings' },
+    { text: 'Tabela', icon: <TableIcon />, path: '/tables' },
     { text: 'Grupos', icon: <GroupsIcon />, path: '/groups' },
     { text: 'Meu Perfil', icon: <ProfileIcon />, path: '/profile' },
     { text: 'Auditoria', icon: <AuditIcon />, path: '/audit' },
@@ -156,6 +158,7 @@ export default function Layout() {
               {location.pathname === '/' ? 'Painel do Participante' :
                location.pathname.startsWith('/predictions') ? 'Meus Palpites' :
                location.pathname.startsWith('/rankings') ? 'Classificação e Ligas' :
+               location.pathname.startsWith('/tables') ? 'Tabela da Copa' :
                location.pathname.startsWith('/groups') ? 'Grupos de Amigos' :
                location.pathname.startsWith('/profile') ? 'Configurações de Perfil' :
                location.pathname.startsWith('/rules') ? 'Regras e Funcionamento' :
