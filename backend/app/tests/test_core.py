@@ -360,6 +360,58 @@ def test_group_invite_candidates_search_and_pending_notification(client, db_sess
     assert pending_res.status_code == 200
     assert any(item["id"] == str(invite.id) for item in pending_res.json())
 
+def test_group_ranking_cache_invalidates_when_invite_is_accepted(client, db_session, test_users):
+    from app.models import RankingCache
+
+    p1 = test_users[2]
+    p2 = test_users[3]
+
+    group = Group(
+        name="Grupo Ranking Cache",
+        description="Cache precisa refletir membros",
+        owner_id=p1.id,
+        invite_code="CACHE123",
+        is_private=True
+    )
+    db_session.add(group)
+    db_session.commit()
+
+    db_session.add(GroupMember(
+        group_id=group.id,
+        user_id=p1.id,
+        role="owner",
+        is_approved=True
+    ))
+    db_session.commit()
+
+    owner_login = client.post("/api/auth/login", data={"username": "p1_user", "password": "password"})
+    owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+    first_rank = client.get(f"/api/rankings/group/{group.id}", headers=owner_headers)
+    assert first_rank.status_code == 200
+    assert [row["user_id"] for row in first_rank.json()] == [str(p1.id)]
+    assert db_session.query(RankingCache).filter(RankingCache.key == f"group_{group.id}").count() == 1
+
+    invite_res = client.post(
+        f"/api/groups/{group.id}/invite",
+        json={"invitee_identifier": p2.username},
+        headers=owner_headers
+    )
+    assert invite_res.status_code == 200
+
+    invited_login = client.post("/api/auth/login", data={"username": "p2_user", "password": "password"})
+    invited_headers = {"Authorization": f"Bearer {invited_login.json()['access_token']}"}
+    accept_res = client.post(
+        f"/api/groups/invitations/{invite_res.json()['id']}/respond?accept=true",
+        headers=invited_headers
+    )
+    assert accept_res.status_code == 200
+    assert db_session.query(RankingCache).filter(RankingCache.key == f"group_{group.id}").count() == 0
+
+    updated_rank = client.get(f"/api/rankings/group/{group.id}", headers=owner_headers)
+    assert updated_rank.status_code == 200
+    assert {row["user_id"] for row in updated_rank.json()} == {str(p1.id), str(p2.id)}
+
 # ==========================================
 # 6. Openfootball Sync Integrity Tests
 # ==========================================

@@ -9,6 +9,7 @@ from ..models import Group, GroupMember, GroupInvitation, User, AuditLog, Match,
 from ..schemas import GroupCreate, GroupResponse, GroupDetailResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate, UserPublicResponse
 from ..auth import get_current_active_user
 from ..settings import get_locked_match_cutoff
+from ..scoring import invalidate_ranking_cache
 import io
 import csv
 from fastapi.responses import StreamingResponse
@@ -237,6 +238,8 @@ def join_group_by_code(
     )
     db.add(audit)
     db.commit()
+    if is_approved:
+        invalidate_ranking_cache(db)
     
     return new_member
 
@@ -403,6 +406,8 @@ def respond_to_invitation(
     )
     db.add(audit)
     db.commit()
+    if accept:
+        invalidate_ranking_cache(db)
     
     return {"message": "Resposta registrada com sucesso.", "status": invite.status}
 
@@ -436,6 +441,7 @@ def approve_member(
     )
     db.add(audit)
     db.commit()
+    invalidate_ranking_cache(db)
     db.refresh(member)
     return member
 
@@ -472,6 +478,7 @@ def remove_member(
     )
     db.add(audit)
     db.commit()
+    invalidate_ranking_cache(db)
     
     return {"message": "Membro removido do grupo com sucesso."}
 
