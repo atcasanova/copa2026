@@ -9,6 +9,19 @@ from app.sync import parse_kickoff_to_utc, ensure_team_exists, sync_openfootball
 # 1. Scoring System Tests
 # ==========================================
 
+def test_login_accepts_email_identifier(client, test_users):
+    participant = test_users[2]
+
+    login_res = client.post(
+        "/api/auth/login",
+        data={"username": participant.email.upper(), "password": "password"}
+    )
+
+    assert login_res.status_code == 200
+    assert login_res.json()["token_type"] == "bearer"
+    assert login_res.json()["access_token"]
+
+
 def test_calculate_base_points():
     # Exact score -> 10 points
     pts, exp = calculate_base_points(2, 1, None, 2, 1, None, False)

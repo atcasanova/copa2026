@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Box, Card, CardContent, Typography, Tabs, Tab, Grid, TextField, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  MenuItem, Select, FormControl, InputLabel, Switch, Alert, Snackbar, Stack,
+  MenuItem, Select, FormControl, InputLabel, Switch, Checkbox, FormControlLabel, Alert, Snackbar, Stack,
   Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link, Badge
 } from '@mui/material'
 import {
@@ -63,6 +63,7 @@ export default function AdminPanel() {
   // 4. Users State
   const [usersList, setUsersList] = useState([])
   const [userSearch, setUserSearch] = useState('')
+  const [hideActiveUsers, setHideActiveUsers] = useState(true)
   const [deleteUserTarget, setDeleteUserTarget] = useState(null)
   const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false)
 
@@ -75,6 +76,8 @@ export default function AdminPanel() {
   const [pixCity, setPixCity] = useState('')
   const [pixEntryFee, setPixEntryFee] = useState('')
   const [paymentUsers, setPaymentUsers] = useState([])
+  const [hideApprovedPayments, setHideApprovedPayments] = useState(true)
+  const [chargingDebtors, setChargingDebtors] = useState(false)
   const [rejectionUserId, setRejectionUserId] = useState(null)
   const [rejectionReason, setRejectionReason] = useState('')
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
@@ -520,6 +523,18 @@ export default function AdminPanel() {
     }
   }
 
+  const handleChargeDebtors = async () => {
+    try {
+      setChargingDebtors(true)
+      const response = await axios.post('/api/payments/admin/charge-debtors')
+      showSuccess(`Cobrança enviada para ${response.data.debtors_count} participante(s).`)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao enviar cobrança pelo WhatsApp.')
+    } finally {
+      setChargingDebtors(false)
+    }
+  }
+
   const handleOpenRejectDialog = (userId) => {
     setRejectionUserId(userId)
     setRejectionReason('')
@@ -568,6 +583,10 @@ export default function AdminPanel() {
   })
 
   const pendingPaymentApprovalsCount = paymentUsers.filter(u => u.payment_status === 'submitted').length
+  const paymentDebtors = paymentUsers.filter(u => !['system_admin', 'score_admin'].includes(u.role) && u.payment_status !== 'approved')
+  const visiblePaymentUsers = hideApprovedPayments
+    ? paymentUsers.filter(u => u.payment_status !== 'approved')
+    : paymentUsers
 
   const groupedMatchesByKickoff = filteredMatches.reduce((groupsAcc, match) => {
     const key = match.kickoff_time
@@ -590,12 +609,19 @@ export default function AdminPanel() {
       matches: group.matches.sort((a, b) => a.id - b.id)
     }))
 
+  const totalUsersCount = usersList.length
+  const activeUsersCount = usersList.filter(u => u.is_active).length
+  const inactiveUsersCount = totalUsersCount - activeUsersCount
   const filteredUsers = usersList.filter(u => {
-    if (userSearch.trim()) {
-      const s = userSearch.toLowerCase()
-      return u.username.toLowerCase().includes(s) || u.display_name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s)
-    }
-    return true
+    if (hideActiveUsers && u.is_active) return false
+    if (!userSearch.trim()) return true
+
+    const s = userSearch.toLowerCase()
+    return (
+      u.username.toLowerCase().includes(s) ||
+      u.display_name.toLowerCase().includes(s) ||
+      u.email.toLowerCase().includes(s)
+    )
   })
 
   const handleSendInvitation = async (e) => {
@@ -1295,14 +1321,39 @@ export default function AdminPanel() {
         <Stack spacing={3}>
           <Card>
             <CardContent sx={{ p: 2 }}>
-              <TextField
-                label="Buscar usuários por username, nome ou e-mail..."
-                variant="outlined"
-                size="small"
-                fullWidth
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-              />
+              <Stack spacing={2}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                  <Box>
+                    <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
+                      👥 Usuários & Acessos
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', rowGap: 1 }}>
+                      <Chip label={`${totalUsersCount} usuário(s)`} size="small" />
+                      <Chip label={`${activeUsersCount} ativo(s)`} color="success" size="small" />
+                      <Chip label={`${inactiveUsersCount} inativo(s)`} color="warning" variant="outlined" size="small" />
+                    </Stack>
+                  </Box>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={hideActiveUsers}
+                        onChange={(e) => setHideActiveUsers(e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Ocultar ativos"
+                    sx={{ m: 0 }}
+                  />
+                </Box>
+                <TextField
+                  label="Buscar usuários por username, nome ou e-mail..."
+                  variant="outlined"
+                  size="small"
+                  fullWidth
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                />
+              </Stack>
             </CardContent>
           </Card>
 
@@ -1319,59 +1370,67 @@ export default function AdminPanel() {
 	                </TableRow>
               </TableHead>
               <TableBody>
-                {filteredUsers.map(u => (
-                  <TableRow key={u.id}>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 700 }}>{u.display_name}</Typography>
-                      <Typography variant="caption" color="text.secondary">@{u.username}</Typography>
+                {filteredUsers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                      {hideActiveUsers ? 'Nenhum usuário inativo para exibir.' : 'Nenhum usuário encontrado.'}
                     </TableCell>
-                    <TableCell>{u.email}</TableCell>
-                    <TableCell align="center">
-                      <Select
-                        size="small"
-                        value={u.role}
-                        disabled={u.id === user.id}
-                        onChange={(e) => handleChangeUserRole(u.id, e.target.value)}
-                        sx={{ fontSize: '0.85rem' }}
-                      >
-                        <MenuItem value="participant">Participante</MenuItem>
-                        <MenuItem value="group_admin">Admin Grupo</MenuItem>
-                        <MenuItem value="score_admin">Admin Resultados</MenuItem>
-                        <MenuItem value="system_admin">Admin Geral</MenuItem>
-                      </Select>
-                    </TableCell>
-                    <TableCell align="center">
-                      <Stack spacing={0.5} alignItems="center">
-                        <Switch
-                          checked={u.is_active}
-                          disabled={u.id === user.id}
-                          color="success"
-                          onChange={() => handleToggleUserActive(u.id, u.is_active)}
-                        />
-                        <Chip
-                          label={u.is_active ? 'Ativo' : 'Inativo'}
-                          color={u.is_active ? 'success' : 'warning'}
+                  </TableRow>
+                ) : (
+                  filteredUsers.map(u => (
+                    <TableRow key={u.id}>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{u.display_name}</Typography>
+                        <Typography variant="caption" color="text.secondary">@{u.username}</Typography>
+                      </TableCell>
+                      <TableCell>{u.email}</TableCell>
+                      <TableCell align="center">
+                        <Select
                           size="small"
-                          variant={u.is_active ? 'filled' : 'outlined'}
-                        />
-                      </Stack>
-                    </TableCell>
-	                    <TableCell align="center">
-	                      {new Date(u.created_at).toLocaleDateString('pt-BR')}
-	                    </TableCell>
-	                    <TableCell align="center">
-	                      <Button
-	                        size="small"
-	                        variant="outlined"
-	                        color="error"
-	                        disabled={u.id === user.id}
-	                        onClick={() => handleOpenDeleteUserDialog(u)}
-	                      >
-	                        Remover
-	                      </Button>
-	                    </TableCell>
-	                  </TableRow>
-                ))}
+                          value={u.role}
+                          disabled={u.id === user.id}
+                          onChange={(e) => handleChangeUserRole(u.id, e.target.value)}
+                          sx={{ fontSize: '0.85rem' }}
+                        >
+                          <MenuItem value="participant">Participante</MenuItem>
+                          <MenuItem value="group_admin">Admin Grupo</MenuItem>
+                          <MenuItem value="score_admin">Admin Resultados</MenuItem>
+                          <MenuItem value="system_admin">Admin Geral</MenuItem>
+                        </Select>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Stack spacing={0.5} alignItems="center">
+                          <Switch
+                            checked={u.is_active}
+                            disabled={u.id === user.id}
+                            color="success"
+                            onChange={() => handleToggleUserActive(u.id, u.is_active)}
+                          />
+                          <Chip
+                            label={u.is_active ? 'Ativo' : 'Inativo'}
+                            color={u.is_active ? 'success' : 'warning'}
+                            size="small"
+                            variant={u.is_active ? 'filled' : 'outlined'}
+                          />
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="center">
+                        {new Date(u.created_at).toLocaleDateString('pt-BR')}
+                      </TableCell>
+                      <TableCell align="center">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          disabled={u.id === user.id}
+                          onClick={() => handleOpenDeleteUserDialog(u)}
+                        >
+                          Remover
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -1530,16 +1589,48 @@ export default function AdminPanel() {
           {/* User Payments Submissions Table */}
           <Grid item xs={12} md={8}>
             <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
-              <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
-                  👥 Comprovantes de Inscrição
-                </Typography>
-                <Chip 
-                  label={`${paymentUsers.filter(u => u.payment_status === 'submitted').length} pendente(s)`} 
-                  color="warning" 
-                  size="small" 
-                  sx={{ fontWeight: 'bold' }} 
-                />
+              <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
+                    👥 Comprovantes de Inscrição
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', rowGap: 1 }}>
+                    <Chip
+                      label={`${pendingPaymentApprovalsCount} pendente(s) de aprovação`}
+                      color="warning"
+                      size="small"
+                      sx={{ fontWeight: 'bold' }}
+                    />
+                    <Chip
+                      label={`${paymentDebtors.length} sem pagamento aprovado`}
+                      variant="outlined"
+                      size="small"
+                    />
+                  </Stack>
+                </Box>
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={hideApprovedPayments}
+                        onChange={(e) => setHideApprovedPayments(e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Ocultar aprovados"
+                    sx={{ m: 0 }}
+                  />
+                  <Button
+                    variant="contained"
+                    color="warning"
+                    onClick={handleChargeDebtors}
+                    disabled={chargingDebtors || paymentDebtors.length === 0}
+                    startIcon={<Box component="span" aria-hidden="true">📢</Box>}
+                    sx={{ whiteSpace: 'nowrap' }}
+                  >
+                    {chargingDebtors ? 'Enviando...' : 'Cobrar devedores'}
+                  </Button>
+                </Stack>
               </Box>
               <Divider />
               <Table size="small">
@@ -1553,14 +1644,14 @@ export default function AdminPanel() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {paymentUsers.length === 0 ? (
+                  {visiblePaymentUsers.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} align="center" sx={{ py: 3, color: 'text.secondary' }}>
-                        Nenhum usuário cadastrado no sistema.
+                        {hideApprovedPayments ? 'Nenhum pagamento pendente para exibir.' : 'Nenhum usuário cadastrado no sistema.'}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    paymentUsers.map(u => (
+                    visiblePaymentUsers.map(u => (
                       <TableRow key={u.id}>
                         <TableCell>
                           <Typography variant="body2" sx={{ fontWeight: 600 }}>{u.display_name}</Typography>

@@ -218,3 +218,61 @@ def test_payment_approval_sends_notification(client, db_session, test_users, mon
     assert captured["files"]["text"] == (None, "\U0001f4b0 Pagamento de Ana Teste foi aprovado!")
     assert captured["files"]["sendAs"] == (None, "text")
     assert captured["timeout"] == 5.0
+
+
+def test_payment_charge_debtors_sends_message_and_pix(client, db_session, test_users, monkeypatch):
+    admin = test_users[0]
+    score_admin = test_users[1]
+    p1 = test_users[2]
+    p2 = test_users[3]
+    captured = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, headers, files, timeout):
+        captured.append({
+            "url": url,
+            "headers": headers,
+            "files": files,
+            "timeout": timeout
+        })
+        return FakeResponse()
+
+    monkeypatch.setenv("WHATSAPP_NOTIFY_ENABLED", "true")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_URL", "http://notify.test/internal/v1/send")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TOKEN", "secret-token")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TO", "120363407064163865@g.us")
+    monkeypatch.setattr("app.notifications.requests.post", fake_post)
+
+    config = db_session.query(PixConfig).filter(PixConfig.id == 1).first()
+    config.pix_key = "pix@bolao.test"
+    config.merchant_name = "BOLAO SERPRO"
+    config.merchant_city = "BRASILIA"
+    config.entry_fee = 50.00
+
+    score_admin.payment_status = "pending"
+    p1.payment_status = "pending"
+    p1.display_name = "Ana\nTeste"
+    p2.payment_status = "rejected"
+    p2.display_name = "Bruno  Silva"
+    db_session.commit()
+
+    admin_headers = get_auth_headers(client, admin.username)
+    res = client.post("/api/payments/admin/charge-debtors", headers=admin_headers)
+
+    assert res.status_code == 200
+    assert res.json()["debtors_count"] == 2
+    assert len(captured) == 2
+
+    charge_text = captured[0]["files"]["text"][1]
+    assert "*BOLÃO 2026 INFORMA:*" in charge_text
+    assert "Ana Teste\nBruno Silva" in charge_text
+    assert "Score Admin Teste" not in charge_text
+    assert "Faça o pagamento" in charge_text
+
+    pix_text = captured[1]["files"]["text"][1]
+    assert "br.gov.bcb.pix" in pix_text
+    assert "\n" not in pix_text
+    assert captured[1]["files"]["to"] == (None, "120363407064163865@g.us")

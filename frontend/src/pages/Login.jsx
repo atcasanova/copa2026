@@ -77,7 +77,7 @@ export default function Login() {
             <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
               <Stack spacing={2.5}>
                 <TextField
-                  label="Nome de usuário"
+                  label="Nome de usuário ou e-mail"
                   variant="outlined"
                   fullWidth
                   required

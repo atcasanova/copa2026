@@ -12,7 +12,7 @@ from ..db import get_db
 from ..models import User, PixConfig, AuditLog
 from ..schemas import PixConfigResponse, PixConfigUpdate, UserResponse
 from ..auth import get_current_active_user
-from ..notifications import send_payment_approval_notification
+from ..notifications import send_payment_approval_notification, send_whatsapp_message
 
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
 
@@ -375,6 +375,97 @@ def admin_list_payments(
             detail="Acesso restrito a administradores."
         )
     return db.query(User).order_by(User.display_name).all()
+
+
+def _sanitize_debtor_name(display_name: str) -> str:
+    clean = "".join(ch if ch.isprintable() else " " for ch in (display_name or "Participante"))
+    clean = " ".join(clean.split())
+    return clean[:80] or "Participante"
+
+
+def _format_payment_charge_message(users: list[User]) -> str:
+    names = "\n".join(_sanitize_debtor_name(user.display_name) for user in users)
+    return "\n".join([
+        "\U0001f4e2 *BOLÃO 2026 INFORMA:*",
+        "",
+        "\U0001f9fe O VAR financeiro revisou o lance e encontrou pendências:",
+        names,
+        "",
+        "Ainda não pagaram o bolão! \U0001f605",
+        "Sem pagar não pode palpitar! Faça o pagamento \U0001f447",
+    ])
+
+
+@router.post("/admin/charge-debtors")
+def admin_charge_payment_debtors(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Sends a WhatsApp charge message to the configured group for participants
+    whose payment has not been approved yet.
+    """
+    if current_user.role not in ["system_admin", "score_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores."
+        )
+
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    if not config or not config.pix_key or not config.merchant_name or not config.merchant_city:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Configure o Pix antes de enviar a cobrança."
+        )
+
+    copia_cola = generate_pix_copia_cola(
+        pix_key=config.pix_key,
+        merchant_name=config.merchant_name,
+        merchant_city=config.merchant_city,
+        entry_fee=float(config.entry_fee or 0.0)
+    )
+    if not copia_cola:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não foi possível gerar o Pix copia e cola."
+        )
+
+    debtors = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status != "approved"
+    ).order_by(User.display_name).all()
+
+    if not debtors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não há participantes com pagamento pendente."
+        )
+
+    first_sent = send_whatsapp_message(_format_payment_charge_message(debtors))
+    if not first_sent:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Não foi possível enviar a cobrança pelo WhatsApp."
+        )
+
+    second_sent = send_whatsapp_message(copia_cola)
+    if not second_sent:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="A cobrança foi enviada, mas não foi possível enviar o Pix copia e cola."
+        )
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="payment_charge_debtors",
+        target_type="payment",
+        target_id="debtors",
+        new_value={"debtors_count": len(debtors)}
+    )
+    db.add(audit)
+    db.commit()
+
+    return {"sent": True, "debtors_count": len(debtors)}
 
 @router.post("/admin/approve/{user_id}", response_model=UserResponse)
 def admin_approve_payment(
