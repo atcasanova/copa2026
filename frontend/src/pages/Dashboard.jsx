@@ -54,17 +54,17 @@ const getFlagUrlLegacy = (emoji) => {
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  
+
   const [stats, setStats] = useState(null)
   const [pendingInvites, setPendingInvites] = useState([])
   const [lockingSoon, setLockingSoon] = useState([])
   const [missingPredictions, setMissingPredictions] = useState([])
   const [upcomingMatches, setUpcomingMatches] = useState([])
-  
+
   // Local state for quick prediction inputs
   const [predGoals, setPredGoals] = useState({})
   const [savedPreds, setSavedPreds] = useState({})
-  
+
   const [loading, setLoading] = useState(true)
   const loadDashboardData = async () => {
     try {
@@ -76,19 +76,19 @@ export default function Dashboard() {
         axios.get('/api/rankings/me')
           .then(res => setStats(res.data))
           .catch(err => console.error('Erro ao carregar estatísticas:', err)),
-        
+
         axios.get('/api/groups/invitations/pending')
           .then(res => setPendingInvites(res.data))
           .catch(err => console.error('Erro ao carregar convites pendentes:', err)),
-        
+
         axios.get('/api/predictions/locking-soon?hours=48')
           .then(res => setLockingSoon(res.data))
           .catch(err => console.error('Erro ao carregar jogos bloqueando em breve:', err)),
-        
+
         axios.get('/api/predictions/missing')
           .then(res => setMissingPredictions(res.data))
           .catch(err => console.error('Erro ao carregar palpites faltantes:', err)),
-        
+
         axios.get('/api/matches')
           .then(res => {
             const now = new Date()
@@ -100,7 +100,7 @@ export default function Dashboard() {
             setUpcomingMatches(future.slice(0, 4))
           })
           .catch(err => console.error('Erro ao carregar próximas partidas:', err)),
-        
+
         axios.get('/api/predictions/my-predictions')
           .then(res => {
             const predsMap = {}
@@ -131,17 +131,17 @@ export default function Dashboard() {
         goals_team1: parseInt(goals1),
         goals_team2: parseInt(goals2)
       })
-      
+
       // Set saved state indicator
       setSavedPreds(prev => ({ ...prev, [matchId]: true }))
       setTimeout(() => {
         setSavedPreds(prev => ({ ...prev, [matchId]: false }))
       }, 3000)
-      
+
       // Reload stats
       const statsRes = await axios.get('/api/rankings/me')
       setStats(statsRes.data)
-      
+
       // Update missing count
       const missingRes = await axios.get('/api/predictions/missing')
       setMissingPredictions(missingRes.data)
@@ -161,7 +161,7 @@ export default function Dashboard() {
 
   const handleInputChange = (matchId, teamField, val) => {
     if (val !== '' && !/^\d+$/.test(val)) return // Only numbers
-    
+
     const currentPred = predGoals[matchId] || {}
     const updatedPred = {
       ...currentPred,
@@ -193,6 +193,65 @@ export default function Dashboard() {
     const d = new Date(isoString)
     return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
   }
+
+  const myGroupsCard = (
+    <Card>
+      <CardContent sx={{ p: 3 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
+            🏆 Meus Grupos
+          </Typography>
+          <Button component={RouterLink} to="/groups" size="small">
+            Ver Todos
+          </Button>
+        </Box>
+
+        <Divider sx={{ mb: 2 }} />
+
+        {stats?.groups?.length === 0 ? (
+          <Box sx={{ py: 3, textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
+              Você não está participando de nenhum grupo de apostas.
+            </Typography>
+            <Button variant="outlined" component={RouterLink} to="/groups" fullWidth size="small">
+              Criar ou Entrar em um Grupo
+            </Button>
+          </Box>
+        ) : (
+          <List disablePadding>
+            {stats?.groups?.map((g) => (
+              <ListItem
+                key={g.group_id}
+                disablePadding
+                sx={{
+                  mb: 1.5,
+                  p: 1.5,
+                  borderRadius: 2,
+                  bgcolor: 'background.default',
+                  border: '1px solid #1f2937',
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.02)' }
+                }}
+                onClick={() => navigate(`/groups/${g.group_id}`)}
+              >
+                <ListItemText
+                  primary={g.group_name}
+                  primaryTypographyProps={{ fontWeight: 600, fontSize: '0.95rem' }}
+                  secondary={g.position ? `Classificação: ${g.position}º lugar` : 'Sem classificação ainda'}
+                  secondaryTypographyProps={{ color: 'primary.main', fontWeight: 600, fontSize: '0.8rem' }}
+                />
+                <ListItemSecondaryAction sx={{ right: 16 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+                    {g.total_points} pts
+                  </Typography>
+                </ListItemSecondaryAction>
+              </ListItem>
+            ))}
+          </List>
+        )}
+      </CardContent>
+    </Card>
+  )
 
   return (
     <Box sx={{ mt: 1 }}>
@@ -273,8 +332,12 @@ export default function Dashboard() {
       </Grid>
 
       <Grid container spacing={3}>
+        <Grid item xs={12}>
+          {myGroupsCard}
+        </Grid>
+
         {/* Left Side: Quick predictions for upcoming matches */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} md={pendingInvites.length > 0 ? 8 : 12}>
           <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: 4 }}>
               <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
@@ -285,7 +348,7 @@ export default function Dashboard() {
                   Ver Todos
                 </Button>
               </Box>
-              
+
               <Divider sx={{ mb: 3 }} />
 
               {upcomingMatches.length === 0 ? (
@@ -295,11 +358,11 @@ export default function Dashboard() {
               ) : (
                 <Stack spacing={3}>
                   {upcomingMatches.map((match) => (
-                    <Box 
+                    <Box
                       key={match.id}
-                      sx={{ 
-                        p: 2.5, 
-                        borderRadius: 3, 
+                      sx={{
+                        p: 2.5,
+                        borderRadius: 3,
                         border: '1px solid',
                         borderColor: 'divider',
                         bgcolor: 'background.default',
@@ -339,7 +402,7 @@ export default function Dashboard() {
                             {match.team1?.fifa_code || match.team1_name}
                           </Box>
                         </Typography>
-                        
+
                         {/* Input 1 */}
                         <TextField
                           size="small"
@@ -395,112 +458,54 @@ export default function Dashboard() {
           </Card>
         </Grid>
 
-        {/* Right Side: Invites and My Groups */}
+        {/* Right Side: Invites */}
+        {pendingInvites.length > 0 && (
         <Grid item xs={12} md={4}>
           <Stack spacing={3} sx={{ height: '100%' }}>
             {/* Pending Group Invites */}
-            {pendingInvites.length > 0 && (
-              <Card sx={{ borderColor: 'secondary.main', borderWidth: '1px' }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: 'secondary.main' }}>
-                    <GroupInviteIcon /> Convites de Grupo
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Aceite para entrar imediatamente no grupo ou recuse para remover o convite.
-                  </Typography>
-                  <List disablePadding>
-                    {pendingInvites.map((invite) => (
-                      <Box key={invite.id} sx={{ mb: 2, p: 2, borderRadius: 2, bgcolor: 'background.default', border: '1px dashed #374151' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          Grupo: {invite.group.name}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-                          Enviado por: {invite.invited_by.display_name}
-                        </Typography>
-                        <Stack direction="row" spacing={1}>
-                          <Button 
-                            variant="contained" 
-                            color="primary" 
-                            size="small"
-                            onClick={() => handleInviteResponse(invite.id, true)}
-                          >
-                            Aceitar e entrar
-                          </Button>
-                          <Button 
-                            variant="outlined" 
-                            color="error" 
-                            size="small"
-                            onClick={() => handleInviteResponse(invite.id, false)}
-                          >
-                            Recusar
-                          </Button>
-                        </Stack>
-                      </Box>
-                    ))}
-                  </List>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* My Groups Standings */}
-            <Card sx={{ flexGrow: 1 }}>
+            <Card sx={{ borderColor: 'secondary.main', borderWidth: '1px' }}>
               <CardContent sx={{ p: 3 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
-                    🏆 Meus Grupos
-                  </Typography>
-                  <Button component={RouterLink} to="/groups" size="small">
-                    Ver Todos
-                  </Button>
-                </Box>
-                
-                <Divider sx={{ mb: 2 }} />
-
-                {stats?.groups?.length === 0 ? (
-                  <Box sx={{ py: 3, textStyle: 'center' }}>
-                    <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
-                      Você não está participando de nenhum grupo de apostas.
-                    </Typography>
-                    <Button variant="outlined" component={RouterLink} to="/groups" fullWidth size="small">
-                      Criar ou Entrar em um Grupo
-                    </Button>
-                  </Box>
-                ) : (
-                  <List disablePadding>
-                    {stats?.groups?.map((g) => (
-                      <ListItem 
-                        key={g.group_id} 
-                        disablePadding
-                        sx={{ 
-                          mb: 1.5,
-                          p: 1.5, 
-                          borderRadius: 2, 
-                          bgcolor: 'background.default', 
-                          border: '1px solid #1f2937',
-                          cursor: 'pointer',
-                          '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.02)' }
-                        }}
-                        onClick={() => navigate(`/groups/${g.group_id}`)}
-                      >
-                        <ListItemText 
-                          primary={g.group_name} 
-                          primaryTypographyProps={{ fontWeight: 600, fontSize: '0.95rem' }}
-                          secondary={`Classificação: ${g.position}º lugar`}
-                          secondaryTypographyProps={{ color: 'primary.main', fontWeight: 600, fontSize: '0.8rem' }}
-                        />
-                        <ListItemSecondaryAction sx={{ right: 16 }}>
-                          <Typography variant="subtitle1" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
-                            {g.total_points} pts
-                          </Typography>
-                        </ListItemSecondaryAction>
-                      </ListItem>
-                    ))}
-                  </List>
-                )}
+                <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: 'secondary.main' }}>
+                  <GroupInviteIcon /> Convites de Grupo
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Aceite para entrar imediatamente no grupo ou recuse para remover o convite.
+                </Typography>
+                <List disablePadding>
+                  {pendingInvites.map((invite) => (
+                    <Box key={invite.id} sx={{ mb: 2, p: 2, borderRadius: 2, bgcolor: 'background.default', border: '1px dashed #374151' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        Grupo: {invite.group.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                        Enviado por: {invite.invited_by.display_name}
+                      </Typography>
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          size="small"
+                          onClick={() => handleInviteResponse(invite.id, true)}
+                        >
+                          Aceitar e entrar
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          color="error"
+                          size="small"
+                          onClick={() => handleInviteResponse(invite.id, false)}
+                        >
+                          Recusar
+                        </Button>
+                      </Stack>
+                    </Box>
+                  ))}
+                </List>
               </CardContent>
             </Card>
           </Stack>
         </Grid>
+        )}
       </Grid>
     </Box>
   )

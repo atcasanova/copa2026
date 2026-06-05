@@ -37,6 +37,39 @@ def test_ranking_history_includes_current_user_by_default(client, test_users):
     assert current_user_entry["snapshots"]
 
 
+def test_my_ranking_lists_member_groups_even_without_ranking_row(client, db_session, test_users):
+    score_admin = test_users[1]
+    group = Group(
+        name="Grupo Admin",
+        description="Grupo com admin de placar",
+        owner_id=score_admin.id,
+        invite_code="ADMINGRP",
+        is_private=True,
+    )
+    db_session.add(group)
+    db_session.flush()
+    db_session.add(GroupMember(
+        group_id=group.id,
+        user_id=score_admin.id,
+        role="owner",
+        is_approved=True,
+    ))
+    db_session.commit()
+
+    login_res = client.post("/api/auth/login", data={"username": score_admin.username, "password": "password"})
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+    res = client.get("/api/rankings/me", headers=headers)
+
+    assert res.status_code == 200
+    assert res.json()["groups"] == [{
+        "group_id": str(group.id),
+        "group_name": "Grupo Admin",
+        "position": None,
+        "total_points": 0,
+    }]
+
+
 def test_calculate_base_points():
     # Exact score -> 10 points
     pts, exp = calculate_base_points(2, 1, None, 2, 1, None, False)

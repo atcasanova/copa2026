@@ -27,6 +27,7 @@ import {
 import axios from 'axios'
 import { useAuth } from '../App'
 import { useSearchParams } from 'react-router-dom'
+import { getFlagUrl } from '../utils/flags'
 
 const userNameCollator = new Intl.Collator('pt-BR', {
   sensitivity: 'base',
@@ -343,14 +344,30 @@ export default function AdminPanel() {
 
   const handleTriggerSyncJob = async () => {
     setSyncLoading(true)
-    setSyncResult('Executando sincronização com repositório do openfootball...')
+    setSyncResult('Consultando API oficial de resultados...')
+    try {
+      const res = await axios.post('/api/admin/football-data/check-scores')
+      setSyncResult(JSON.stringify(res.data, null, 2))
+      const updated = res.data?.updated_matches || 0
+      showSuccess(updated > 0 ? `${updated} resultado(s) atualizado(s) pela API oficial.` : 'Consulta concluída. Nenhum resultado novo encontrado.')
+      loadInitialData()
+    } catch (err) {
+      setSyncResult('Erro na consulta da API oficial: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setSyncLoading(false)
+    }
+  }
+
+  const handleTriggerLegacyOpenfootballSync = async () => {
+    setSyncLoading(true)
+    setSyncResult('Executando sincronização legada com repositório openfootball...')
     try {
       const res = await axios.post('/api/admin/sync/job')
       setSyncResult(JSON.stringify(res.data, null, 2))
-      showSuccess('Sincronização manual executada!')
+      showSuccess('Sincronização legada executada.')
       loadInitialData()
     } catch (err) {
-      setSyncResult('Erro na sincronização: ' + err.message)
+      setSyncResult('Erro na sincronização legada: ' + err.message)
     } finally {
       setSyncLoading(false)
     }
@@ -528,6 +545,55 @@ export default function AdminPanel() {
 
   const formatDateTime = (isoString) => {
     return new Date(isoString).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+  }
+
+  const renderScoreInput = (matchId, field, value) => (
+    <TextField
+      size="small"
+      type="number"
+      value={value}
+      onChange={(e) => handleScoreDraftChange(matchId, field, e.target.value)}
+      inputProps={{ min: 0, step: 1, style: { textAlign: 'center', fontWeight: 700, fontSize: '1.05rem' } }}
+      sx={{ width: { xs: 48, sm: 56 } }}
+    />
+  )
+
+  const renderAdminTeamLabel = (match, teamNumber) => {
+    const team = teamNumber === 1 ? match.team1 : match.team2
+    const teamName = teamNumber === 1 ? match.team1_name : match.team2_name
+    const flagUrl = getFlagUrl(team?.flag_icon, team)
+    return (
+      <Typography
+        variant="body2"
+        sx={{
+          fontWeight: 700,
+          minWidth: { xs: 78, sm: 140 },
+          maxWidth: { xs: 92, sm: 180 },
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: teamNumber === 1 ? 'flex-end' : 'flex-start',
+          gap: 1,
+          textAlign: teamNumber === 1 ? 'right' : 'left'
+        }}
+      >
+        {teamNumber === 1 && flagUrl && <img src={flagUrl} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />}
+        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {teamName}
+        </Box>
+        <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {team?.fifa_code || teamName}
+        </Box>
+        {teamNumber === 2 && flagUrl && <img src={flagUrl} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />}
+      </Typography>
+    )
+  }
+
+  const renderMatchStatusChip = (status) => {
+    if (status === 'score_confirmed') return <Chip label="Confirmado" color="success" size="small" />
+    if (status === 'score_pending_review') return <Chip label="Revisar" color="warning" size="small" />
+    if (status === 'postponed') return <Chip label="Adiado" color="error" size="small" />
+    if (status === 'cancelled') return <Chip label="Cancelado" color="error" size="small" />
+    return <Chip label="Agendado" variant="outlined" size="small" />
   }
 
   // ==========================================
@@ -802,10 +868,6 @@ export default function AdminPanel() {
 	              {matchTimeGroups.map(group => (
 	                <Card key={group.key}>
 	                  <CardContent sx={{ p: 0 }}>
-	                    {(() => {
-	                      const hasKnockoutMatch = group.matches.some(match => match.stage !== 'Group Stage')
-	                      return (
-	                        <>
 	                    <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid #1f2937' }}>
 	                      <Box>
 	                        <Typography variant="subtitle1" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
@@ -826,150 +888,97 @@ export default function AdminPanel() {
 	                      </Button>
 	                    </Box>
 
-	                    <TableContainer component={Paper} sx={{ boxShadow: 'none' }}>
-	                      <Table size="small">
-	                        <TableHead>
-	                          <TableRow>
-	                            <TableCell>Partida</TableCell>
-	                            <TableCell align="center">Tempo Normal</TableCell>
-	                            {hasKnockoutMatch && <TableCell align="center">Prorrogação</TableCell>}
-	                            {hasKnockoutMatch && <TableCell align="center">Pênaltis</TableCell>}
-	                            <TableCell align="center">Status</TableCell>
-	                            <TableCell align="center">Ações</TableCell>
-	                          </TableRow>
-	                        </TableHead>
-	                        <TableBody>
-	                          {group.matches.map(match => {
-	                            const draft = getScoreDraft(match.id)
-	                            return (
-	                              <TableRow key={match.id}>
-	                                <TableCell sx={{ minWidth: 260 }}>
-	                                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-	                                    {match.team1_name} x {match.team2_name}
-	                                  </Typography>
-	                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+	                    <Stack spacing={1.5} sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+	                      {group.matches.map(match => {
+	                        const draft = getScoreDraft(match.id)
+	                        const isKnockout = match.stage !== 'Group Stage'
+	                        return (
+	                          <Box
+	                            key={match.id}
+	                            sx={{
+	                              p: { xs: 1.5, sm: 2 },
+	                              borderRadius: 2,
+	                              border: '1px solid',
+	                              borderColor: 'divider',
+	                              bgcolor: 'background.default'
+	                            }}
+	                          >
+	                            <Stack spacing={1.5}>
+	                              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+	                                <Box sx={{ minWidth: 0 }}>
+	                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 600 }}>
 	                                    {match.round} · ID #{match.id}
 	                                  </Typography>
-	                                  <Typography variant="caption" color="text.secondary">
+	                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
 	                                    {match.ground}
 	                                  </Typography>
-	                                </TableCell>
-	                                <TableCell align="center">
-	                                  <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
-	                                    <TextField
-	                                      size="small"
-	                                      type="number"
-	                                      value={draft.score_ft_team1}
-	                                      onChange={(e) => handleScoreDraftChange(match.id, 'score_ft_team1', e.target.value)}
-	                                      inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
-	                                      sx={{ width: 64 }}
-	                                    />
-	                                    <Typography variant="body2">x</Typography>
-	                                    <TextField
-	                                      size="small"
-	                                      type="number"
-	                                      value={draft.score_ft_team2}
-	                                      onChange={(e) => handleScoreDraftChange(match.id, 'score_ft_team2', e.target.value)}
-	                                      inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
-	                                      sx={{ width: 64 }}
-	                                    />
-	                                  </Stack>
-	                                </TableCell>
-	                                {hasKnockoutMatch && (
-	                                  <TableCell align="center">
-	                                    {match.stage === 'Group Stage' ? (
-	                                      <Typography variant="caption" color="text.secondary">-</Typography>
-	                                    ) : (
+	                                </Box>
+	                                <Stack direction="row" spacing={1} alignItems="center" justifyContent={{ xs: 'space-between', sm: 'flex-end' }}>
+	                                  {renderMatchStatusChip(match.status)}
+	                                  <Select
+	                                    size="small"
+	                                    value={match.status}
+	                                    onChange={(e) => handleStatusChange(match.id, e.target.value)}
+	                                    sx={{ height: 30, fontSize: '0.75rem', minWidth: 116 }}
+	                                  >
+	                                    <MenuItem value="scheduled">Agendado</MenuItem>
+	                                    <MenuItem value="score_pending_review" disabled>Revisar</MenuItem>
+	                                    <MenuItem value="score_confirmed" disabled>Confirmado</MenuItem>
+	                                    <MenuItem value="postponed">Adiado</MenuItem>
+	                                    <MenuItem value="cancelled">Cancelado</MenuItem>
+	                                  </Select>
+	                                </Stack>
+	                              </Stack>
+
+	                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 0.75, sm: 1.5 }, width: '100%' }}>
+	                                {renderAdminTeamLabel(match, 1)}
+	                                {renderScoreInput(match.id, 'score_ft_team1', draft.score_ft_team1)}
+	                                <Typography variant="body2" sx={{ fontWeight: 800, color: 'text.secondary' }}>x</Typography>
+	                                {renderScoreInput(match.id, 'score_ft_team2', draft.score_ft_team2)}
+	                                {renderAdminTeamLabel(match, 2)}
+	                              </Box>
+
+	                              {isKnockout && (
+	                                <Grid container spacing={1.5}>
+	                                  <Grid item xs={12} sm={6}>
+	                                    <Box sx={{ p: 1.25, borderRadius: 2, border: '1px solid #1f2937' }}>
+	                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mb: 1 }}>
+	                                        Prorrogação
+	                                      </Typography>
 	                                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
-	                                        <TextField
-	                                          size="small"
-	                                          type="number"
-	                                          value={draft.score_et_team1}
-	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_et_team1', e.target.value)}
-	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
-	                                          sx={{ width: 64 }}
-	                                        />
+	                                        {renderScoreInput(match.id, 'score_et_team1', draft.score_et_team1)}
 	                                        <Typography variant="body2">x</Typography>
-	                                        <TextField
-	                                          size="small"
-	                                          type="number"
-	                                          value={draft.score_et_team2}
-	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_et_team2', e.target.value)}
-	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
-	                                          sx={{ width: 64 }}
-	                                        />
+	                                        {renderScoreInput(match.id, 'score_et_team2', draft.score_et_team2)}
 	                                      </Stack>
-	                                    )}
-	                                  </TableCell>
-	                                )}
-	                                {hasKnockoutMatch && (
-	                                  <TableCell align="center">
-	                                    {match.stage === 'Group Stage' ? (
-	                                      <Typography variant="caption" color="text.secondary">-</Typography>
-	                                    ) : (
+	                                    </Box>
+	                                  </Grid>
+	                                  <Grid item xs={12} sm={6}>
+	                                    <Box sx={{ p: 1.25, borderRadius: 2, border: '1px solid #1f2937' }}>
+	                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mb: 1 }}>
+	                                        Pênaltis
+	                                      </Typography>
 	                                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
-	                                        <TextField
-	                                          size="small"
-	                                          type="number"
-	                                          value={draft.score_pen_team1}
-	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_pen_team1', e.target.value)}
-	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
-	                                          sx={{ width: 64 }}
-	                                        />
+	                                        {renderScoreInput(match.id, 'score_pen_team1', draft.score_pen_team1)}
 	                                        <Typography variant="body2">x</Typography>
-	                                        <TextField
-	                                          size="small"
-	                                          type="number"
-	                                          value={draft.score_pen_team2}
-	                                          onChange={(e) => handleScoreDraftChange(match.id, 'score_pen_team2', e.target.value)}
-	                                          inputProps={{ min: 0, step: 1, style: { textAlign: 'center' } }}
-	                                          sx={{ width: 64 }}
-	                                        />
+	                                        {renderScoreInput(match.id, 'score_pen_team2', draft.score_pen_team2)}
 	                                      </Stack>
-	                                    )}
-	                                  </TableCell>
+	                                    </Box>
+	                                  </Grid>
+	                                </Grid>
+	                              )}
+
+	                              <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+	                                {match.status === 'score_pending_review' && (
+	                                  <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />} onClick={() => handleConfirmScore(match.id)}>
+	                                    Confirmar
+	                                  </Button>
 	                                )}
-	                                <TableCell align="center">
-	                                  {match.status === 'score_confirmed' ? (
-	                                    <Chip label="Confirmado" color="success" size="small" />
-	                                  ) : match.status === 'score_pending_review' ? (
-	                                    <Chip label="Revisar" color="warning" size="small" />
-	                                  ) : match.status === 'postponed' ? (
-	                                    <Chip label="Adiado" color="error" size="small" />
-	                                  ) : match.status === 'cancelled' ? (
-	                                    <Chip label="Cancelado" color="error" size="small" />
-	                                  ) : (
-	                                    <Chip label="Agendado" variant="outlined" size="small" />
-	                                  )}
-	                                </TableCell>
-	                                <TableCell align="center">
-	                                  <Stack direction="row" spacing={1} justifyContent="center">
-	                                    {match.status === 'score_pending_review' && (
-	                                      <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />} onClick={() => handleConfirmScore(match.id)}>
-	                                        Confirmar
-	                                      </Button>
-	                                    )}
-	                                    <Select
-	                                      size="small"
-	                                      value={match.status}
-	                                      onChange={(e) => handleStatusChange(match.id, e.target.value)}
-	                                      sx={{ height: 30, fontSize: '0.75rem', minWidth: 120 }}
-	                                    >
-	                                      <MenuItem value="scheduled">Agendado</MenuItem>
-	                                      <MenuItem value="postponed">Adiado</MenuItem>
-	                                      <MenuItem value="cancelled">Cancelado</MenuItem>
-	                                    </Select>
-	                                  </Stack>
-	                                </TableCell>
-	                              </TableRow>
-	                            )
-	                          })}
-	                        </TableBody>
-	                      </Table>
-	                    </TableContainer>
-	                        </>
-	                      )
-	                    })()}
+	                              </Stack>
+	                            </Stack>
+	                          </Box>
+	                        )
+	                      })}
+	                    </Stack>
 	                  </CardContent>
 	                </Card>
 	              ))}
@@ -986,32 +995,65 @@ export default function AdminPanel() {
           <Card>
             <CardContent sx={{ p: 4 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
-                🔄 Controle da Sincronização Automática
+                🔄 Resultados Oficiais via API
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                A sincronização automática roda diariamente às 01:00 AM consultando os repositórios do openfootball. Abaixo, você pode forçar as operações manualmente.
+                A API oficial consulta partidas já encerradas, preenche placares disponíveis, recalcula pontuação e registra auditoria automaticamente. Use esta ação para forçar uma consulta manual fora da rotina agendada.
               </Typography>
-              <Stack direction="row" spacing={2}>
-                <Button variant="contained" color="secondary" startIcon={<SyncIcon />} onClick={handleTriggerInitialSeed} disabled={syncLoading}>
-                  Seed Carga Inicial (Times/Estádios/Tabela)
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Grid item xs={12} sm={4}>
+                  <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+	                    <Typography variant="caption" color="text.secondary">Revisão manual exibida</Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 800 }}>{matches.filter(m => m.status === 'score_pending_review').length}</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+	                    <Typography variant="caption" color="text.secondary">Horários pendentes exibidos</Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 800 }}>{matchTimeGroups.length}</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+                    <Typography variant="caption" color="text.secondary">Diffs legados pendentes</Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 800 }}>{syncDiffs.length}</Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+              <Button variant="contained" color="primary" startIcon={<SyncIcon />} onClick={handleTriggerSyncJob} disabled={syncLoading}>
+                Buscar resultados oficiais agora
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
+                Openfootball legado e carga inicial
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                O openfootball permanece útil para seed de times, estádios e tabela original. A varredura legada de resultados fica disponível apenas para auditoria/compatibilidade e não deve ser o fluxo principal de placares.
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Button variant="outlined" color="secondary" startIcon={<SyncIcon />} onClick={handleTriggerInitialSeed} disabled={syncLoading}>
+                  Seed inicial de tabela
                 </Button>
-                <Button variant="contained" color="primary" startIcon={<SyncIcon />} onClick={handleTriggerSyncJob} disabled={syncLoading}>
-                  Executar Varredura e Sync de Resultados
+                <Button variant="outlined" color="primary" startIcon={<SyncIcon />} onClick={handleTriggerLegacyOpenfootballSync} disabled={syncLoading}>
+                  Rodar sync legado openfootball
                 </Button>
               </Stack>
             </CardContent>
           </Card>
 
-          {/* Diffs Pending Review Panel */}
           <Card>
             <CardContent sx={{ p: 4 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
-                ⌛ Diffs de Placares Pendentes de Revisão ({syncDiffs.length})
+                ⌛ Diffs legados pendentes de revisão ({syncDiffs.length})
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Se um resultado oficial for alterado na sincronização após ter sido confirmado por um administrador, o sistema NÃO sobrescreve silenciosamente. A alteração fica listada aqui para aprovação manual.
+                Se uma sincronização legada encontrar diferença em placar já confirmado por administrador, ela fica listada aqui para aprovação manual. O fluxo principal pela API oficial atualiza apenas partidas ainda sem placar confirmado.
               </Typography>
-              
+
               <TableContainer component={Paper} sx={{ boxShadow: 'none' }}>
                 <Table size="small">
                   <TableHead>

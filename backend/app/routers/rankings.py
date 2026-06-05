@@ -143,13 +143,12 @@ def get_my_ranking_positions(
     for mem in memberships:
         group_ranking = get_rankings(db, group_id=mem.group_id)
         my_group_row = next((row for row in group_ranking if row["user_id"] == current_user.id), None)
-        if my_group_row:
-            group_positions.append({
-                "group_id": mem.group_id,
-                "group_name": mem.group.name,
-                "position": my_group_row["position"],
-                "total_points": my_group_row["total_points"]
-            })
+        group_positions.append({
+            "group_id": mem.group_id,
+            "group_name": mem.group.name,
+            "position": my_group_row["position"] if my_group_row else None,
+            "total_points": my_group_row["total_points"] if my_group_row else 0
+        })
             
     return {
         "general": {
