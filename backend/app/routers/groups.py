@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
 from ..db import get_db
-from ..models import Group, GroupMember, GroupInvitation, User, AuditLog, Match, Prediction
+from ..models import Announcement, Group, GroupMember, GroupInvitation, User, AuditLog, Match, Prediction
 from ..schemas import GroupCreate, GroupResponse, GroupDetailResponse, GroupUpdate, GroupMemberResponse, GroupInvitationResponse, GroupInvitationCreate, UserPublicResponse
 from ..auth import get_current_active_user
 from ..settings import get_locked_match_cutoff
@@ -171,6 +171,34 @@ def get_group_details(
             raise HTTPException(status_code=403, detail="Acesso negado: Este é um grupo privado.")
             
     return serialize_group_detail(group, check_group_admin(db, group_id, current_user.id))
+
+@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_group(
+    group_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Grupo não encontrado.")
+
+    if group.owner_id != current_user.id and current_user.role != "system_admin":
+        raise HTTPException(status_code=403, detail="Apenas o proprietário do grupo pode excluí-lo.")
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="group_delete",
+        target_type="group",
+        target_id=str(group.id),
+        old_value={"name": group.name, "owner_id": str(group.owner_id)}
+    )
+    db.add(audit)
+
+    db.query(Announcement).filter(Announcement.target_group_id == group_id).delete(synchronize_session=False)
+    db.delete(group)
+    db.commit()
+    invalidate_ranking_cache(db)
+    return None
 
 @router.get("/{group_id}/members", response_model=List[GroupMemberResponse])
 def get_group_members(

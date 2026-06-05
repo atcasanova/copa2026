@@ -1,8 +1,9 @@
-import React, { useState } from 'react'
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { Link as RouterLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
+  Alert,
   AppBar, Box, Drawer, IconButton, List, ListItem, ListItemButton,
-  ListItemIcon, ListItemText, Toolbar, Typography, Button, Avatar, Divider, useMediaQuery, useTheme
+  ListItemIcon, ListItemText, Toolbar, Typography, Avatar, Divider, Badge, Link as MuiLink, useMediaQuery, useTheme
 } from '@mui/material'
 import {
   Menu as MenuIcon,
@@ -17,6 +18,7 @@ import {
   HelpOutline as HelpIcon,
   VerifiedUser as AuditIcon
 } from '@mui/icons-material'
+import axios from 'axios'
 import { useAuth } from '../App'
 
 const drawerWidth = 260;
@@ -28,17 +30,70 @@ export default function Layout() {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [groupNotificationsCount, setGroupNotificationsCount] = useState(0)
+  const [adminNotificationsCount, setAdminNotificationsCount] = useState(0)
+  const [whatsappGroupChat, setWhatsappGroupChat] = useState('')
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen)
   }
+
+  const loadNavigationNotifications = async () => {
+    if (!user) {
+      setGroupNotificationsCount(0)
+      setAdminNotificationsCount(0)
+      return
+    }
+
+    try {
+      const groupRes = await axios.get('/api/groups/invitations/pending')
+      setGroupNotificationsCount(groupRes.data.length || 0)
+    } catch (err) {
+      setGroupNotificationsCount(0)
+    }
+
+    if (user.role === 'system_admin' || user.role === 'score_admin') {
+      try {
+        const adminRes = await axios.get('/api/admin/notifications/summary')
+        setAdminNotificationsCount(adminRes.data.total || 0)
+      } catch (err) {
+        setAdminNotificationsCount(0)
+      }
+    } else {
+      setAdminNotificationsCount(0)
+    }
+  }
+
+  useEffect(() => {
+    loadNavigationNotifications()
+    const interval = window.setInterval(loadNavigationNotifications, 60000)
+
+    const handleFocus = () => loadNavigationNotifications()
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [user?.id, user?.role, location.pathname])
+
+  useEffect(() => {
+    if (!user) {
+      setWhatsappGroupChat('')
+      return
+    }
+
+    axios.get('/api/auth/profile-config')
+      .then(res => setWhatsappGroupChat(res.data?.whatsapp_group_chat || ''))
+      .catch(() => setWhatsappGroupChat(''))
+  }, [user?.id])
 
   const menuItems = [
     { text: 'Painel Geral', icon: <DashIcon />, path: '/' },
     { text: 'Meus Palpites', icon: <SoccerIcon />, path: '/predictions' },
     { text: 'Classificação', icon: <RankIcon />, path: '/rankings' },
     { text: 'Tabela', icon: <TableIcon />, path: '/tables' },
-    { text: 'Grupos', icon: <GroupsIcon />, path: '/groups' },
+    { text: 'Grupos', icon: <GroupsIcon />, path: '/groups', badgeCount: groupNotificationsCount },
     { text: 'Meu Perfil', icon: <ProfileIcon />, path: '/profile' },
     { text: 'Auditoria', icon: <AuditIcon />, path: '/audit' },
     { text: 'Regras do Bolão', icon: <HelpIcon />, path: '/rules' },
@@ -46,8 +101,12 @@ export default function Layout() {
 
   // Add Admin Console option if user is system_admin or score_admin
   if (user && (user.role === 'system_admin' || user.role === 'score_admin')) {
-    menuItems.push({ text: 'Administração', icon: <AdminIcon />, path: '/admin' })
+    menuItems.push({ text: 'Administração', icon: <AdminIcon />, path: '/admin', badgeCount: adminNotificationsCount })
   }
+
+  const shouldShowPaymentNotice = user &&
+    !['system_admin', 'score_admin'].includes(user.role) &&
+    user.payment_status !== 'approved'
 
   const drawerContent = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
@@ -100,7 +159,9 @@ export default function Layout() {
                 }}
               >
                 <ListItemIcon sx={{ color: active ? 'primary.main' : 'text.secondary', minWidth: 40 }}>
-                  {item.icon}
+                  <Badge badgeContent={item.badgeCount || 0} color="warning" invisible={!item.badgeCount} max={99}>
+                    {item.icon}
+                  </Badge>
                 </ListItemIcon>
                 <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: active ? 600 : 500, fontSize: '0.95rem' }} />
               </ListItemButton>
@@ -218,6 +279,34 @@ export default function Layout() {
           color: 'text.primary',
         }}
       >
+        {shouldShowPaymentNotice && (
+          <Alert
+            severity="warning"
+            sx={{
+              position: 'sticky',
+              top: { xs: 80, sm: 88 },
+              zIndex: theme.zIndex.appBar - 1,
+              mb: 3,
+              borderRadius: 2,
+              fontWeight: 600,
+              '& .MuiAlert-message': { width: '100%' }
+            }}
+          >
+            Você só poderá dar palpites após ter seu pagamento aprovado pelo admin. Faça o pagamento na seção{' '}
+            <MuiLink component={RouterLink} to="/profile" color="inherit" sx={{ fontWeight: 800, textDecoration: 'underline' }}>
+              Meu Perfil
+            </MuiLink>
+            {whatsappGroupChat && (
+              <>
+                {' '}ou no{' '}
+                <MuiLink href={whatsappGroupChat} target="_blank" rel="noopener noreferrer" color="inherit" sx={{ fontWeight: 800, textDecoration: 'underline' }}>
+                  grupo de chat do bolão
+                </MuiLink>
+              </>
+            )}
+            .
+          </Alert>
+        )}
         <Outlet />
       </Box>
     </Box>

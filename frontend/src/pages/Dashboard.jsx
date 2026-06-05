@@ -403,7 +403,10 @@ export default function Dashboard() {
               <Card sx={{ borderColor: 'secondary.main', borderWidth: '1px' }}>
                 <CardContent sx={{ p: 3 }}>
                   <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2, display: 'flex', alignItems: 'center', gap: 1, color: 'secondary.main' }}>
-                    <GroupInviteIcon /> Convites Pendentes
+                    <GroupInviteIcon /> Convites de Grupo
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Aceite para entrar imediatamente no grupo ou recuse para remover o convite.
                   </Typography>
                   <List disablePadding>
                     {pendingInvites.map((invite) => (
@@ -421,7 +424,7 @@ export default function Dashboard() {
                             size="small"
                             onClick={() => handleInviteResponse(invite.id, true)}
                           >
-                            Aceitar
+                            Aceitar e entrar
                           </Button>
                           <Button 
                             variant="outlined" 

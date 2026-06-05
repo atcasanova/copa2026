@@ -62,10 +62,13 @@ O arquivo `.env` gerencia as configurações cruciais e credenciais de seguranç
 | `TEAMS_JSON_URL` | Link JSON dos times do openfootball | *(URL Raw GitHub)* |
 | `STADIUMS_JSON_URL` | Link JSON dos estádios do openfootball | *(URL Raw GitHub)* |
 | `MATCHES_JSON_URL` | Link JSON das partidas do openfootball | *(URL Raw GitHub)* |
+| `OPENFOOTBALL_DAILY_SYNC_ENABLED` | Habilita o job diário automático de sincronização openfootball | `false` |
 | `SMTP_HOST` / `SMTP_PORT` | Servidor SMTP para reset de senha | `mail.example.internal` / `25` |
 | `SMTP_STARTTLS` | Habilita STARTTLS no SMTP | `false` |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | Credenciais SMTP, se necessárias | vazio |
 | `SMTP_FROM` | Remetente dos e-mails do sistema | `bolao@example.com` |
+| `ADMIN_REGISTRATION_NOTIFY_ENABLED` | Envia e-mail aos administradores quando um novo usuário se cadastra | `true` |
+| `ADMIN_REGISTRATION_NOTIFY_TO` | Destinatários da notificação de cadastro, separados por vírgula. Se vazio, usa todos os `system_admin` ativos | vazio |
 | `WHATSAPP_NOTIFY_ENABLED` | Habilita mensagens via API interna de WhatsApp | `false` |
 | `WHATSAPP_NOTIFY_URL` | Endpoint de envio da API de WhatsApp | `http://whatsgo-bot-1:9999/internal/v1/send` |
 | `WHATSAPP_NOTIFY_TOKEN` | Bearer token da API interna de WhatsApp | `change_me_whatsapp_internal_api_token` |
@@ -73,6 +76,11 @@ O arquivo `.env` gerencia as configurações cruciais e credenciais de seguranç
 | `WHATSAPP_NOTIFY_SEND_AS` | Formato de envio da API de WhatsApp | `text` |
 | `WHATSAPP_NOTIFY_TIMEOUT_SECONDS` | Timeout do envio em segundos | `5` |
 | `WHATSAPP_GROUP_CHAT` | Link do grupo de WhatsApp exibido no perfil dos participantes | `https://chat.whatsapp.com/change_me_invite_code` |
+| `FOOTBALL_DATA_ENABLED` | Habilita a consulta automática de placares no football-data.org | `true` |
+| `FOOTBALL_DATA_API` | Token da API football-data.org enviado no header `X-Auth-Token` | `change_me_football_data_api_token` |
+| `FOOTBALL_DATA_COMPETITION` | Código da competição no football-data.org | `WC` |
+| `FOOTBALL_DATA_TIMEOUT_SECONDS` | Timeout da consulta de placares em segundos | `10` |
+| `FOOTBALL_DATA_MAX_REQUESTS_PER_RUN` | Limite de chamadas HTTP ao football-data.org por execução do job | `8` |
 | `GITHUB_AUDIT` | Habilita publicação dos blocos de auditoria dos palpites no GitHub | `false` |
 | `GITHUB_REPO` | Repositório usado apenas para os blocos de auditoria | `git@github.com:seu-usuario/palpites-copa-2026-auditoria.git` |
 | `GITHUB_TOKEN` | Token do GitHub com permissão de leitura/escrita em Contents no repositório | `change_me_github_token_with_contents_write` |
@@ -99,7 +107,8 @@ No primeiro boot do contêiner backend:
 
 ## Funcionamento da Sincronização Diária (Daily Sync)
 
-- O sistema agenda um job em segundo plano (APScheduler) para executar diariamente às **01:00 AM (fuso America/Sao_Paulo)**.
+- O job diário do openfootball só é agendado quando `OPENFOOTBALL_DAILY_SYNC_ENABLED=true`. Por padrão ele fica desligado, pois os placares automáticos vêm do football-data.org.
+- Quando habilitado, o sistema agenda um job em segundo plano (APScheduler) para executar diariamente às **01:00 AM (fuso America/Sao_Paulo)**.
 - O job baixa a versão mais atualizada dos confrontos e compara com os registros locais.
 - Se o placar de uma partida estiver marcado como **confirmado por um administrador** (`score_confirmed_by_admin = True`), a sincronização **NÃO** alterará o placar local. Em vez disso, salvará um alerta na tabela de diferenças (Diffs) exibido no menu administrativo, aguardando aprovação humana para evitar fraudes ou perdas.
 - Se o placar local não estiver confirmado ou for nulo, a sincronização atualiza as informações e dispara automaticamente o **Recálculo de Notas e Classificações**.
@@ -119,6 +128,14 @@ Eventos enviados:
 Recomendação de Docker:
 - Se a API de WhatsApp estiver em outro Compose no mesmo host, conecte o `bolao_backend` à mesma rede Docker dessa API e use o nome do serviço na URL, por exemplo `http://whatsgo-bot-1:9999/internal/v1/send`.
 - Alternativamente, publique a API no host com `ports: ["9998:9999"]` e use `http://host.docker.internal:9998/internal/v1/send`, mantendo o `extra_hosts` já configurado no backend.
+
+---
+
+## Placar Automático
+
+Quando `FOOTBALL_DATA_ENABLED=true` e `FOOTBALL_DATA_API` está configurada, o backend consulta o football-data.org uma vez por minuto. A consulta só considera partidas sem placar a partir de 2 horas depois do horário de início. Se houver mais de um jogo no mesmo horário, o ranking só é recalculado quando todos os jogos daquele horário estiverem com status `FINISHED` na API. Para respeitar o plano free, cada execução faz no máximo `FOOTBALL_DATA_MAX_REQUESTS_PER_RUN` chamadas HTTP.
+
+Para prorrogação ou pênaltis, o sistema usa `score.regularTime` quando disponível; em partidas encerradas no tempo normal, usa `score.fullTime`. O endpoint administrativo `POST /api/admin/football-data/check-scores` dispara a mesma verificação manualmente para testes.
 
 ---
 

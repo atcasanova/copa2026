@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, JSON, Numeric, Table, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Boolean, Date, DateTime, ForeignKey, JSON, Numeric, Table, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from .db import Base
@@ -270,6 +270,22 @@ class RankingCache(Base):
     key = Column(String, primary_key=True)
     data = Column(JSON, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class RankingSnapshot(Base):
+    __tablename__ = "ranking_snapshots"
+    __table_args__ = (UniqueConstraint("snapshot_date", "user_id", name="uq_ranking_snapshot_date_user"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    display_name = Column(String, nullable=False)
+    avatar_url = Column(String, nullable=True)
+    position = Column(Integer, nullable=False)
+    total_points = Column(Integer, nullable=False)
+    exact_scores_count = Column(Integer, default=0, nullable=False)
+    correct_results_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class SystemInvitation(Base):

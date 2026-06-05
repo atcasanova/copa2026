@@ -1,6 +1,19 @@
+import unicodedata
 from typing import List
 from sqlalchemy.orm import Session
-from ..models import Match
+from ..models import Match, User
+
+def normalized_text_sort_key(value: str | None) -> str:
+    text = unicodedata.normalize("NFKD", value or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.casefold()
+
+def user_name_sort_key(user: User) -> tuple[str, str, str]:
+    return (
+        normalized_text_sort_key(user.display_name),
+        normalized_text_sort_key(user.username),
+        normalized_text_sort_key(user.email),
+    )
 
 def get_unlocked_stages(db: Session) -> List[str]:
     """

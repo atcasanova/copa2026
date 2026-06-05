@@ -13,6 +13,7 @@ from ..models import User, PixConfig, AuditLog
 from ..schemas import PixConfigResponse, PixConfigUpdate, UserResponse
 from ..auth import get_current_active_user
 from ..notifications import send_payment_approval_notification, send_whatsapp_message
+from .utils import user_name_sort_key
 
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
 
@@ -374,7 +375,7 @@ def admin_list_payments(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso restrito a administradores."
         )
-    return db.query(User).order_by(User.display_name).all()
+    return sorted(db.query(User).all(), key=user_name_sort_key)
 
 
 def _sanitize_debtor_name(display_name: str) -> str:
@@ -430,10 +431,10 @@ def admin_charge_payment_debtors(
             detail="Não foi possível gerar o Pix copia e cola."
         )
 
-    debtors = db.query(User).filter(
+    debtors = sorted(db.query(User).filter(
         User.role.notin_(["system_admin", "score_admin"]),
         User.payment_status != "approved"
-    ).order_by(User.display_name).all()
+    ).all(), key=user_name_sort_key)
 
     if not debtors:
         raise HTTPException(
@@ -504,8 +505,57 @@ def admin_approve_payment(
     )
     db.add(audit)
     db.commit()
-    send_payment_approval_notification(user)
+    send_payment_approval_notification(db, user)
     
+    return user
+
+@router.post("/admin/revert/{user_id}", response_model=UserResponse)
+def admin_revert_payment_approval(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Reverts an approved participant payment back to review/pending state.
+    """
+    if current_user.role not in ["system_admin", "score_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores."
+        )
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado."
+        )
+
+    if user.payment_status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Apenas pagamentos aprovados podem ser revertidos."
+        )
+
+    previous_status = user.payment_status
+    next_status = "submitted" if user.payment_proof_filename else "pending"
+    user.payment_status = next_status
+    user.payment_rejected_reason = None
+
+    db.commit()
+    db.refresh(user)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="payment_revert_approval",
+        target_type="user",
+        target_id=str(user.id),
+        old_value={"payment_status": previous_status},
+        new_value={"payment_status": next_status}
+    )
+    db.add(audit)
+    db.commit()
+
     return user
 
 @router.post("/admin/reject/{user_id}", response_model=UserResponse)

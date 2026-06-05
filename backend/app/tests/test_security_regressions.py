@@ -1,13 +1,94 @@
 from datetime import datetime, timedelta
 
-from app.models import Announcement, AuditLog, Group, GroupMember, Match, PasswordResetToken, Prediction, Stadium, Team, User
-from app.auth import verify_password
+from app.models import Announcement, AuditLog, Group, GroupInvitation, GroupMember, Match, PasswordResetToken, Prediction, Stadium, Team, User
+from app.auth import get_password_hash, verify_password
 
 
 def login_headers(client, username, password="password"):
     response = client.post("/api/auth/login", data={"username": username, "password": password})
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_admin_notifications_summary_counts_pending_items(client, db_session, test_users):
+    admin = test_users[0]
+    participant = test_users[2]
+
+    participant.payment_status = "submitted"
+    db_session.add_all([
+        Team(name="Time A", group_name="A"),
+        Team(name="Time B", group_name="A"),
+        Stadium(name="Estadio Teste", city="Brasilia", timezone="UTC"),
+    ])
+    db_session.flush()
+    db_session.add(Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="13:00 UTC+0",
+        kickoff_time=datetime(2026, 6, 11, 13, 0),
+        team1_name="Time A",
+        team2_name="Time B",
+        ground="Estadio Teste",
+        status="score_pending_review",
+    ))
+    db_session.commit()
+
+    res = client.get("/api/admin/notifications/summary", headers=login_headers(client, admin.username))
+
+    assert res.status_code == 200
+    assert res.json()["pending_payment_approvals"] == 1
+    assert res.json()["pending_score_reviews"] == 1
+    assert res.json()["total"] == 2
+
+
+def test_admin_users_are_sorted_ignoring_case_and_accents(client, db_session, test_users):
+    admin = test_users[0]
+    password = get_password_hash("password")
+    db_session.add_all([
+        User(username="sortcase_1", email="sortcase1@test.com", display_name="bruno", hashed_password=password),
+        User(username="sortcase_2", email="sortcase2@test.com", display_name="Álvaro", hashed_password=password),
+        User(username="sortcase_3", email="sortcase3@test.com", display_name="alberto", hashed_password=password),
+        User(username="sortcase_4", email="sortcase4@test.com", display_name="Cézar", hashed_password=password),
+    ])
+    db_session.commit()
+
+    res = client.get("/api/admin/users?search=sortcase", headers=login_headers(client, admin.username))
+
+    assert res.status_code == 200
+    assert [u["display_name"] for u in res.json()] == ["alberto", "Álvaro", "bruno", "Cézar"]
+
+
+def test_group_owner_can_delete_group_and_member_cannot(client, db_session, test_users):
+    owner = test_users[2]
+    member = test_users[3]
+
+    group = Group(
+        name="Grupo para excluir",
+        description="Temporario",
+        owner_id=owner.id,
+        invite_code="DEL12345",
+        is_private=True,
+    )
+    db_session.add(group)
+    db_session.flush()
+    db_session.add_all([
+        GroupMember(group_id=group.id, user_id=owner.id, role="owner", is_approved=True),
+        GroupMember(group_id=group.id, user_id=member.id, role="member", is_approved=True),
+        GroupInvitation(group_id=group.id, invited_by_id=owner.id, invitee_id=member.id, status="pending"),
+        Announcement(title="Aviso", body="Grupo", target_type="group", target_group_id=group.id, priority="low"),
+    ])
+    db_session.commit()
+
+    member_res = client.delete(f"/api/groups/{group.id}", headers=login_headers(client, member.username))
+    assert member_res.status_code == 403
+
+    owner_res = client.delete(f"/api/groups/{group.id}", headers=login_headers(client, owner.username))
+    assert owner_res.status_code == 204
+    assert db_session.query(Group).filter(Group.id == group.id).first() is None
+    assert db_session.query(GroupMember).filter(GroupMember.group_id == group.id).count() == 0
+    assert db_session.query(GroupInvitation).filter(GroupInvitation.group_id == group.id).count() == 0
+    assert db_session.query(Announcement).filter(Announcement.target_group_id == group.id).count() == 0
 
 
 def test_group_invite_code_is_admin_only_and_pending_members_are_not_listed(client, db_session, test_users):
@@ -228,6 +309,8 @@ def test_match_prediction_visibility_hides_scores_before_lock(client, db_session
     assert res.status_code == 200
     data = res.json()
     assert data["is_locked"] is False
+    assert data["is_scored"] is False
+    assert data["points_summary"] == []
     assert data["total_predictions"] == 1
     assert data["entries"][0]["display_name"] == participant.display_name
     assert data["entries"][0]["goals_team1"] is None
@@ -267,8 +350,56 @@ def test_match_prediction_visibility_shows_scores_after_lock(client, db_session,
     assert res.status_code == 200
     data = res.json()
     assert data["is_locked"] is True
+    assert data["is_scored"] is False
     assert data["entries"][0]["goals_team1"] == 2
     assert data["entries"][0]["goals_team2"] == 1
+
+
+def test_match_prediction_visibility_groups_by_points_after_score(client, db_session, test_users):
+    viewer = test_users[2]
+    participant = test_users[3]
+
+    db_session.add_all([
+        Team(name="Brasil", group_name="A"),
+        Team(name="Canada", group_name="A"),
+        Stadium(name="Scored Visibility Stadium", city="City", timezone="UTC")
+    ])
+    db_session.commit()
+
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="18:00 UTC+0",
+        kickoff_time=datetime.utcnow() - timedelta(hours=3),
+        team1_name="Brasil",
+        team2_name="Canada",
+        ground="Scored Visibility Stadium",
+        status="score_confirmed",
+        score_ft_team1=2,
+        score_ft_team2=1
+    )
+    db_session.add(match)
+    db_session.commit()
+    db_session.add_all([
+        Prediction(match_id=match.id, user_id=viewer.id, goals_team1=2, goals_team2=1, points_earned=10),
+        Prediction(match_id=match.id, user_id=participant.id, goals_team1=1, goals_team2=0, points_earned=6),
+    ])
+    db_session.commit()
+
+    headers = login_headers(client, viewer.username)
+    res = client.get(f"/api/predictions/match/{match.id}/visibility", headers=headers)
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_locked"] is True
+    assert data["is_scored"] is True
+    assert data["points_summary"] == [
+        {"points": 10, "count": 1},
+        {"points": 6, "count": 1},
+    ]
+    assert [entry["points_earned"] for entry in data["entries"]] == [10, 6]
+    assert [entry["display_name"] for entry in data["entries"]] == [viewer.display_name, participant.display_name]
 
 
 def test_system_admin_can_delete_participant(client, db_session, test_users):

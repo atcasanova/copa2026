@@ -153,11 +153,18 @@ class MatchPredictionVisibilityEntry(BaseModel):
     goals_team1: Optional[int] = None
     goals_team2: Optional[int] = None
     qualified_team_name: Optional[str] = None
+    points_earned: Optional[int] = None
+
+class MatchPredictionPointsSummary(BaseModel):
+    points: int
+    count: int
 
 class MatchPredictionVisibilityResponse(BaseModel):
     match_id: int
     is_locked: bool
+    is_scored: bool
     total_predictions: int
+    points_summary: List[MatchPredictionPointsSummary] = []
     entries: List[MatchPredictionVisibilityEntry]
 
 # Group Schemas

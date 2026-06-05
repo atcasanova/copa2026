@@ -5,6 +5,8 @@ os.environ["TESTING"] = "true"
 os.environ["PAYMENT_APPROVAL_NOTIFY_ENABLED"] = "false"
 os.environ["WHATSAPP_NOTIFY_ENABLED"] = "false"
 os.environ["GITHUB_AUDIT"] = "false"
+os.environ["ADMIN_REGISTRATION_NOTIFY_ENABLED"] = "false"
+os.environ["ADMIN_REGISTRATION_NOTIFY_TO"] = ""
 
 import pytest
 from sqlalchemy import create_engine

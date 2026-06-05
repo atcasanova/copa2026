@@ -4,7 +4,7 @@ import {
   Box, Card, CardContent, Grid, Typography, Button, TextField, Divider, Alert, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Avatar, Stack,
   Chip, List, ListItem, ListItemText, ListItemSecondaryAction, IconButton, Tooltip,
-  Autocomplete, CircularProgress
+  Autocomplete, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material'
 import {
   ContentCopy as CopyIcon,
@@ -17,7 +17,8 @@ import {
   ArrowUpward as PromoteIcon,
   ArrowDownward as DemoteIcon,
   CheckCircle as ApproveIcon,
-  Download as ExportIcon
+  Download as ExportIcon,
+  DeleteForever as DeleteIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
@@ -39,6 +40,8 @@ export default function GroupDetails() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingGroup, setDeletingGroup] = useState(false)
 
   const loadGroupDetails = async () => {
     try {
@@ -201,6 +204,20 @@ export default function GroupDetails() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       alert('Erro ao exportar os palpites do grupo.')
+    }
+  }
+
+  const handleDeleteGroup = async () => {
+    if (!group) return
+    try {
+      setDeletingGroup(true)
+      await axios.delete(`/api/groups/${groupId}`)
+      navigate('/groups')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao excluir grupo.')
+      setDeleteDialogOpen(false)
+    } finally {
+      setDeletingGroup(false)
     }
   }
 
@@ -494,6 +511,18 @@ export default function GroupDetails() {
                     >
                       {group.is_private ? 'Tornar Público' : 'Tornar Privado'}
                     </Button>
+                    {isGroupOwner && (
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        size="small"
+                        startIcon={<DeleteIcon />}
+                        onClick={() => setDeleteDialogOpen(true)}
+                        fullWidth
+                      >
+                        Excluir Grupo
+                      </Button>
+                    )}
                   </Stack>
                 </CardContent>
               </Card>
@@ -601,6 +630,36 @@ export default function GroupDetails() {
           </Stack>
         </Grid>
       </Grid>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => !deletingGroup && setDeleteDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          Excluir grupo?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Esta ação exclui o grupo <strong>{group.name}</strong>, remove os membros, cancela convites pendentes e apaga comunicados específicos deste grupo. Os palpites dos participantes permanecem no bolão geral.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deletingGroup}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={handleDeleteGroup}
+            disabled={deletingGroup}
+          >
+            {deletingGroup ? 'Excluindo...' : 'Excluir definitivamente'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

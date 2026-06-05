@@ -2,9 +2,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .sync import sync_openfootball_data
 from .db import SessionLocal
 from .notifications import send_due_prediction_reminders
+from .football_data import sync_finished_scores_from_football_data
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bolao_scheduler")
@@ -31,17 +33,33 @@ def scheduled_prediction_reminders_job():
     finally:
         db.close()
 
+def scheduled_football_data_scores_job():
+    db = SessionLocal()
+    try:
+        result = sync_finished_scores_from_football_data(db)
+        if result.get("updated_matches") or result.get("errors"):
+            logger.info(f"[Scheduler] Consulta football-data.org concluída: {result}")
+    except Exception as e:
+        logger.error(f"[Scheduler] Falha ao consultar placares do football-data.org: {str(e)}")
+    finally:
+        db.close()
+
+def openfootball_daily_sync_enabled():
+    return os.getenv("OPENFOOTBALL_DAILY_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+
 def start_scheduler():
     scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
-    # Agenda a execução diária às 01:00 AM no fuso horário America/Sao_Paulo
-    scheduler.add_job(
-        scheduled_sync_job,
-        'cron',
-        hour=1,
-        minute=0,
-        id='daily_sync_job',
-        replace_existing=True
-    )
+    if openfootball_daily_sync_enabled():
+        scheduler.add_job(
+            scheduled_sync_job,
+            'cron',
+            hour=1,
+            minute=0,
+            id='daily_sync_job',
+            replace_existing=True
+        )
+    else:
+        logger.info("[Scheduler] Sincronização diária openfootball desabilitada por configuração.")
     scheduler.add_job(
         scheduled_prediction_reminders_job,
         'interval',
@@ -50,5 +68,13 @@ def start_scheduler():
         replace_existing=True,
         next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo"))
     )
+    scheduler.add_job(
+        scheduled_football_data_scores_job,
+        'interval',
+        minutes=1,
+        id='football_data_scores_job',
+        replace_existing=True,
+        next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo"))
+    )
     scheduler.start()
-    logger.info("[Scheduler] APScheduler iniciado com sincronização diária e lembretes de palpites a cada 5 minutos.")
+    logger.info("[Scheduler] APScheduler iniciado com lembretes e consulta automática de placares.")

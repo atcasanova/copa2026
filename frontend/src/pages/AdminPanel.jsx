@@ -3,7 +3,8 @@ import {
   Box, Card, CardContent, Typography, Tabs, Tab, Grid, TextField, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   MenuItem, Select, FormControl, InputLabel, Switch, Checkbox, FormControlLabel, Alert, Snackbar, Stack,
-  Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link, Badge
+  Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link, Badge,
+  IconButton, Tooltip
 } from '@mui/material'
 import {
   ExpandMore as ExpandIcon,
@@ -17,21 +18,58 @@ import {
   FileDownload as DownloadIcon,
   Check as CheckIcon,
   Close as CloseIcon,
+  Description as ProofIcon,
+  HourglassEmpty as PendingPaymentIcon,
   Payments as PaymentIcon,
-  Mail as MailIcon
+  Mail as MailIcon,
+  Undo as RevertIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
+import { useSearchParams } from 'react-router-dom'
+
+const userNameCollator = new Intl.Collator('pt-BR', {
+  sensitivity: 'base',
+  numeric: true
+})
+
+const compareUsersByName = (a, b) => {
+  const displayNameCompare = userNameCollator.compare(a.display_name || '', b.display_name || '')
+  if (displayNameCompare !== 0) return displayNameCompare
+
+  const usernameCompare = userNameCollator.compare(a.username || '', b.username || '')
+  if (usernameCompare !== 0) return usernameCompare
+
+  return userNameCollator.compare(a.email || '', b.email || '')
+}
 
 export default function AdminPanel() {
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   
   // Tabs: 0=Matches, 1=Sync, 2=Config, 3=Announcements, 4=Users, 5=Logs
-  const [tabIndex, setTabIndex] = useState(0)
+  const [tabIndex, setTabIndex] = useState(searchParams.get('tab') === 'payments' ? 6 : 0)
   
   // Shared options
   const [matches, setMatches] = useState([])
   const [stages, setStages] = useState([])
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'payments' && user?.role === 'system_admin') {
+      setTabIndex(6)
+    }
+  }, [searchParams, user?.role])
+
+  const handleTabChange = (event, value) => {
+    setTabIndex(value)
+    if (value === 6) {
+      setSearchParams({ tab: 'payments' })
+    } else if (searchParams.has('tab')) {
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete('tab')
+      setSearchParams(nextParams)
+    }
+  }
   
   // 0. Matches Management State
   const [filterStage, setFilterStage] = useState('All')
@@ -78,9 +116,7 @@ export default function AdminPanel() {
   const [paymentUsers, setPaymentUsers] = useState([])
   const [hideApprovedPayments, setHideApprovedPayments] = useState(true)
   const [chargingDebtors, setChargingDebtors] = useState(false)
-  const [rejectionUserId, setRejectionUserId] = useState(null)
-  const [rejectionReason, setRejectionReason] = useState('')
-  const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
+  const [revertPaymentTarget, setRevertPaymentTarget] = useState(null)
 
   // Invitations State
   const [inviteEmail, setInviteEmail] = useState('')
@@ -125,7 +161,7 @@ export default function AdminPanel() {
 
         // Load users list
         const usersRes = await axios.get('/api/admin/users')
-        setUsersList(usersRes.data)
+        setUsersList([...usersRes.data].sort(compareUsersByName))
 
         // Load audit logs
         const logsRes = await axios.get('/api/admin/audit-logs')
@@ -140,7 +176,7 @@ export default function AdminPanel() {
 
         // Load payments list
         const paymentsRes = await axios.get('/api/payments/admin/list')
-        setPaymentUsers(paymentsRes.data)
+        setPaymentUsers([...paymentsRes.data].sort(compareUsersByName))
 
         // Load invitations list
         const invitesRes = await axios.get('/api/admin/invitations')
@@ -523,6 +559,18 @@ export default function AdminPanel() {
     }
   }
 
+  const handleConfirmRevertPaymentApproval = async () => {
+    if (!revertPaymentTarget) return
+    try {
+      await axios.post(`/api/payments/admin/revert/${revertPaymentTarget.id}`)
+      showSuccess('Aprovação de pagamento revertida.')
+      setRevertPaymentTarget(null)
+      loadInitialData()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Erro ao reverter aprovação de pagamento.')
+    }
+  }
+
   const handleChargeDebtors = async () => {
     try {
       setChargingDebtors(true)
@@ -532,29 +580,6 @@ export default function AdminPanel() {
       setError(err.response?.data?.detail || 'Erro ao enviar cobrança pelo WhatsApp.')
     } finally {
       setChargingDebtors(false)
-    }
-  }
-
-  const handleOpenRejectDialog = (userId) => {
-    setRejectionUserId(userId)
-    setRejectionReason('')
-    setRejectDialogOpen(true)
-  }
-
-  const handleConfirmRejectPayment = async () => {
-    if (!rejectionReason.trim()) {
-      alert('Por favor, informe a justificativa da recusa.')
-      return
-    }
-    try {
-      const formData = new FormData()
-      formData.append('reason', rejectionReason)
-      await axios.post(`/api/payments/admin/reject/${rejectionUserId}`, formData)
-      showSuccess('Pagamento recusado.')
-      setRejectDialogOpen(false)
-      loadInitialData()
-    } catch (err) {
-      alert('Erro ao recusar pagamento.')
     }
   }
 
@@ -583,10 +608,12 @@ export default function AdminPanel() {
   })
 
   const pendingPaymentApprovalsCount = paymentUsers.filter(u => u.payment_status === 'submitted').length
-  const paymentDebtors = paymentUsers.filter(u => !['system_admin', 'score_admin'].includes(u.role) && u.payment_status !== 'approved')
+  const paymentDebtors = paymentUsers
+    .filter(u => !['system_admin', 'score_admin'].includes(u.role) && u.payment_status !== 'approved')
+    .sort(compareUsersByName)
   const visiblePaymentUsers = hideApprovedPayments
-    ? paymentUsers.filter(u => u.payment_status !== 'approved')
-    : paymentUsers
+    ? paymentUsers.filter(u => u.payment_status !== 'approved').sort(compareUsersByName)
+    : [...paymentUsers].sort(compareUsersByName)
 
   const groupedMatchesByKickoff = filteredMatches.reduce((groupsAcc, match) => {
     const key = match.kickoff_time
@@ -612,17 +639,19 @@ export default function AdminPanel() {
   const totalUsersCount = usersList.length
   const activeUsersCount = usersList.filter(u => u.is_active).length
   const inactiveUsersCount = totalUsersCount - activeUsersCount
-  const filteredUsers = usersList.filter(u => {
-    if (hideActiveUsers && u.is_active) return false
-    if (!userSearch.trim()) return true
+  const filteredUsers = usersList
+    .filter(u => {
+      if (hideActiveUsers && u.is_active) return false
+      if (!userSearch.trim()) return true
 
-    const s = userSearch.toLowerCase()
-    return (
-      u.username.toLowerCase().includes(s) ||
-      u.display_name.toLowerCase().includes(s) ||
-      u.email.toLowerCase().includes(s)
-    )
-  })
+      const s = userSearch.toLowerCase()
+      return (
+        u.username.toLowerCase().includes(s) ||
+        u.display_name.toLowerCase().includes(s) ||
+        u.email.toLowerCase().includes(s)
+      )
+    })
+    .sort(compareUsersByName)
 
   const handleSendInvitation = async (e) => {
     e.preventDefault()
@@ -716,7 +745,7 @@ export default function AdminPanel() {
 
       <Tabs
         value={tabIndex}
-        onChange={(e, val) => setTabIndex(val)}
+        onChange={handleTabChange}
         textColor="primary"
         indicatorColor="primary"
         variant="scrollable"
@@ -1588,7 +1617,17 @@ export default function AdminPanel() {
 
           {/* User Payments Submissions Table */}
           <Grid item xs={12} md={8}>
-            <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
+            <TableContainer
+              component={Paper}
+              sx={{
+                borderRadius: 3,
+                overflowX: 'hidden',
+                '& .MuiTableCell-root': {
+                  px: { xs: 0.5, sm: 1.5 },
+                  py: { xs: 1, sm: 1.5 }
+                }
+              }}
+            >
               <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
                 <Box>
                   <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
@@ -1636,10 +1675,13 @@ export default function AdminPanel() {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>Usuário / Nome</TableCell>
-                    <TableCell>Chave Pix Informada</TableCell>
+                    <TableCell>Usuário</TableCell>
+                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Chave Pix Informada</TableCell>
                     <TableCell align="center">Status</TableCell>
-                    <TableCell align="center">Comprovante</TableCell>
+                    <TableCell align="center">
+                      <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Comprovante</Box>
+                      <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Comp.</Box>
+                    </TableCell>
                     <TableCell align="center">Ações</TableCell>
                   </TableRow>
                 </TableHead>
@@ -1654,52 +1696,114 @@ export default function AdminPanel() {
                     visiblePaymentUsers.map(u => (
                       <TableRow key={u.id}>
                         <TableCell>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{u.display_name}</Typography>
-                          <Typography variant="caption" color="text.secondary">@{u.username}</Typography>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 600,
+                              maxWidth: { xs: 96, sm: 'none' },
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {u.display_name}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{
+                              display: 'block',
+                              maxWidth: { xs: 96, sm: 'none' },
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            @{u.username}
+                          </Typography>
                         </TableCell>
-                        <TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
                           <Typography variant="body2">{u.pix_key_receive || '-'}</Typography>
                         </TableCell>
                         <TableCell align="center">
-                          {u.payment_status === 'approved' && <Chip label="Aprovado" color="success" size="small" />}
-                          {u.payment_status === 'submitted' && <Chip label="Aguardando" color="warning" size="small" />}
-                          {u.payment_status === 'rejected' && <Chip label="Recusado" color="error" size="small" />}
-                          {u.payment_status === 'pending' && <Chip label="Pendente" variant="outlined" size="small" />}
+                          <Box sx={{ display: { xs: 'inline-flex', sm: 'none' }, alignItems: 'center' }}>
+                            <Tooltip title={u.payment_status === 'approved' ? 'Pagamento aprovado' : 'Pagamento pendente'}>
+                              {u.payment_status === 'approved' ? (
+                                <CheckIcon color="success" fontSize="small" />
+                              ) : (
+                                <PendingPaymentIcon color="warning" fontSize="small" />
+                              )}
+                            </Tooltip>
+                          </Box>
+                          <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
+                            {u.payment_status === 'approved' && <Chip label="Aprovado" color="success" size="small" />}
+                            {u.payment_status === 'submitted' && <Chip label="Aguardando" color="warning" size="small" />}
+                            {u.payment_status === 'rejected' && <Chip label="Recusado" color="error" size="small" />}
+                            {u.payment_status === 'pending' && <Chip label="Pendente" variant="outlined" size="small" />}
+                          </Box>
                         </TableCell>
                         <TableCell align="center">
                           {u.payment_proof_filename ? (
-                            <Button
-                              size="small"
-                              variant="text"
-                              onClick={() => handleViewPaymentProof(u.id)}
-                              sx={{ fontSize: '0.85rem', textTransform: 'none' }}
-                            >
-                              Ver Comprovante
-                            </Button>
+                            <>
+                              <Tooltip title="Ver comprovante">
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => handleViewPaymentProof(u.id)}
+                                  aria-label={`Ver comprovante de ${u.display_name}`}
+                                  sx={{ display: { xs: 'inline-flex', sm: 'none' } }}
+                                >
+                                  <ProofIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Button
+                                size="small"
+                                variant="text"
+                                onClick={() => handleViewPaymentProof(u.id)}
+                                sx={{ display: { xs: 'none', sm: 'inline-flex' }, fontSize: '0.85rem', textTransform: 'none' }}
+                              >
+                                Ver Comprovante
+                              </Button>
+                            </>
                           ) : (
-                            <Typography variant="caption" color="text.secondary">Não enviado</Typography>
+                            <>
+                              <Tooltip title="Comprovante não enviado">
+                                <CloseIcon color="error" fontSize="small" sx={{ display: { xs: 'inline-flex', sm: 'none' } }} />
+                              </Tooltip>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                                Não enviado
+                              </Typography>
+                            </>
                           )}
                         </TableCell>
                         <TableCell align="center">
-                          <Stack direction="row" spacing={1} justifyContent="center">
-                            <Button
-                              size="small"
-                              variant="contained"
-                              color="success"
-                              disabled={u.payment_status === 'approved'}
-                              onClick={() => handleApprovePayment(u.id)}
-                            >
-                              Aprovar
-                            </Button>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="error"
-                              disabled={u.payment_status === 'rejected' || !u.payment_proof_filename}
-                              onClick={() => handleOpenRejectDialog(u.id)}
-                            >
-                              Recusar
-                            </Button>
+                          <Stack direction="row" spacing={0.5} justifyContent="center">
+                            <Tooltip title="Aprovar pagamento">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="success"
+                                  disabled={u.payment_status === 'approved'}
+                                  onClick={() => handleApprovePayment(u.id)}
+                                  aria-label={`Aprovar pagamento de ${u.display_name}`}
+                                >
+                                  <CheckIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Reverter aprovação">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="warning"
+                                  disabled={u.payment_status !== 'approved'}
+                                  onClick={() => setRevertPaymentTarget(u)}
+                                  aria-label={`Reverter aprovação de pagamento de ${u.display_name}`}
+                                >
+                                  <RevertIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1857,30 +1961,21 @@ export default function AdminPanel() {
         </Stack>
       )}
 
-      {/* Dialog for Payment Rejection Justification */}
-      <Dialog open={rejectDialogOpen} onClose={() => setRejectDialogOpen(false)}>
-        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 'bold' }}>Justificativa para Recusa de Pagamento</DialogTitle>
+      <Dialog open={Boolean(revertPaymentTarget)} onClose={() => setRevertPaymentTarget(null)}>
+        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 'bold' }}>Reverter Aprovação de Pagamento</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1, minWidth: 350 }}>
+          <Stack spacing={2} sx={{ mt: 1, minWidth: { xs: 260, sm: 360 } }}>
+            <Alert severity="warning" sx={{ borderRadius: 2 }}>
+              Os palpites deste participante voltarão a ficar bloqueados até nova aprovação de pagamento.
+            </Alert>
             <Typography variant="body2" color="text.secondary">
-              Escreva o motivo pelo qual este comprovante está sendo recusado. Isso será mostrado para o usuário.
+              Reverter a aprovação de pagamento de <strong>{revertPaymentTarget?.display_name}</strong>?
             </Typography>
-            <TextField
-              label="Justificativa da Recusa"
-              multiline
-              rows={3}
-              variant="outlined"
-              fullWidth
-              required
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="Ex: Comprovante de outro bolão ou valor incompleto."
-            />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRejectDialogOpen(false)}>Cancelar</Button>
-          <Button onClick={handleConfirmRejectPayment} variant="contained" color="error">Recusar Pagamento</Button>
+          <Button onClick={() => setRevertPaymentTarget(null)}>Cancelar</Button>
+          <Button onClick={handleConfirmRevertPaymentApproval} variant="contained" color="warning">Reverter Aprovação</Button>
         </DialogActions>
       </Dialog>
 

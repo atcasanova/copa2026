@@ -1,8 +1,10 @@
 import pytest
+from email import message_from_string
 from datetime import datetime, timedelta
 from app.models import User, SystemInvitation, Match, Prediction, Team, Stadium
 from app.auth import get_password_hash
 from app.scoring import get_rankings
+from app.routers.auth import send_admin_registration_notification_email
 
 def get_auth_headers(client, username, password="password"):
     login_data = {"username": username, "password": password}
@@ -138,6 +140,89 @@ def test_hidden_registration_link_creates_active_user(client, db_session, test_u
 
     login_res = client.post("/api/auth/login", data={"username": "direct_user", "password": "securepassword123"})
     assert login_res.status_code == 200
+
+def test_registration_notifies_admins_by_email(client, db_session, test_users, monkeypatch):
+    admin = test_users[0]
+    captured = {}
+
+    monkeypatch.setenv("ADMIN_REGISTRATION_NOTIFY_ENABLED", "true")
+    monkeypatch.delenv("ADMIN_REGISTRATION_NOTIFY_TO", raising=False)
+    monkeypatch.setenv("FRONTEND_URL", "https://bolao.example.com")
+
+    def fake_send(user, recipients, registration_method):
+        captured["display_name"] = user.display_name
+        captured["email"] = user.email
+        captured["recipients"] = recipients
+        captured["registration_method"] = registration_method
+        return True
+
+    monkeypatch.setattr(
+        "app.routers.auth.send_admin_registration_notification_email",
+        fake_send
+    )
+
+    admin_headers = get_auth_headers(client, admin.username)
+    link_res = client.get("/api/admin/registration-link", headers=admin_headers)
+    registration_code = link_res.json()["code"]
+
+    register_res = client.post(
+        f"/api/auth/register?registration_code={registration_code}",
+        json={
+            "username": "notify_user",
+            "email": "notify@test.com",
+            "display_name": "Usuário Notificado",
+            "password": "securepassword123"
+        }
+    )
+
+    assert register_res.status_code == 201
+    assert captured["display_name"] == "Usuário Notificado"
+    assert captured["email"] == "notify@test.com"
+    assert admin.email in captured["recipients"]
+    assert len(captured["recipients"]) >= 1
+    assert captured["registration_method"] == "registration_link"
+
+def test_admin_registration_notification_email_contains_html_payment_link(test_users, monkeypatch):
+    participant = test_users[2]
+    captured = {}
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, username, password):
+            pass
+
+        def sendmail(self, sender, recipients, message):
+            captured["sender"] = sender
+            captured["recipients"] = recipients
+            captured["message"] = message
+
+    monkeypatch.setenv("FRONTEND_URL", "https://bolao.example.com")
+    monkeypatch.setattr("app.routers.auth.smtplib.SMTP", FakeSMTP)
+
+    sent = send_admin_registration_notification_email(
+        participant,
+        ["admin@test.com"],
+        "registration_link"
+    )
+
+    assert sent is True
+    assert captured["recipients"] == ["admin@test.com"]
+    parsed_message = message_from_string(captured["message"])
+    html_part = next(part for part in parsed_message.walk() if part.get_content_type() == "text/html")
+    html_body = html_part.get_payload(decode=True).decode(html_part.get_content_charset() or "utf-8")
+    assert "https://bolao.example.com/admin?tab=payments" in html_body
+    assert participant.display_name in html_body
 
 def test_admin_exclusion_from_rankings(client, db_session, test_users):
     # Ensure system_admin is in users but not in computed rankings

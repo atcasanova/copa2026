@@ -3,7 +3,7 @@ import {
   Box, Card, CardContent, Typography, Grid, MenuItem, Select, FormControl,
   InputLabel, FormControlLabel, Checkbox, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, TextField, IconButton, Alert, Tooltip, Stack, Chip, Tabs, Tab,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogActions, Divider
 } from '@mui/material'
 import {
   Lock as LockIcon,
@@ -616,6 +616,17 @@ export default function Predictions() {
       </Box>
     )
   }
+
+  const predictionPointGroups = predictionListData?.is_scored
+    ? Object.values((predictionListData.entries || []).reduce((groups, entry) => {
+        const points = Number(entry.points_earned || 0)
+        if (!groups[points]) {
+          groups[points] = { points, entries: [] }
+        }
+        groups[points].entries.push(entry)
+        return groups
+      }, {})).sort((a, b) => b.points - a.points)
+    : []
 
   return (
     <Box sx={{ mt: 1 }}>
@@ -1315,6 +1326,81 @@ export default function Predictions() {
                 <Alert severity="info" sx={{ borderRadius: 2 }}>
                   Nenhum participante registrou palpite para este jogo ainda.
                 </Alert>
+              ) : predictionListData.is_scored ? (
+                <Stack spacing={2}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
+                      Distribuição de pontos
+                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ rowGap: 1 }}>
+                      {(predictionListData.points_summary || []).map(item => (
+                        <Chip
+                          key={item.points}
+                          label={`${item.count} ${item.count === 1 ? 'pessoa' : 'pessoas'} com ${item.points} pts`}
+                          color={item.points > 0 ? 'success' : 'default'}
+                          variant={item.points > 0 ? 'filled' : 'outlined'}
+                          size="small"
+                          sx={{ fontWeight: 800 }}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  {predictionPointGroups.map(group => (
+                    <Box key={group.points}>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                        <Chip
+                          label={`${group.points} pts`}
+                          color={group.points > 0 ? 'primary' : 'default'}
+                          size="small"
+                          sx={{ fontWeight: 900, fontFamily: 'Outfit' }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          {group.entries.length} {group.entries.length === 1 ? 'palpiteiro' : 'palpiteiros'}
+                        </Typography>
+                      </Stack>
+                      <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Participante</TableCell>
+                              <TableCell align="center">Palpite</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {group.entries.map(entry => (
+                              <TableRow key={entry.user_id}>
+                                <TableCell>
+                                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                    {entry.display_name}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    Enviado em {formatDateTime(entry.created_at)}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Chip
+                                    label={`${entry.goals_team1} x ${entry.goals_team2}`}
+                                    color="primary"
+                                    variant="outlined"
+                                    size="small"
+                                    sx={{ fontWeight: 800, fontFamily: 'Outfit' }}
+                                  />
+                                  {entry.qualified_team_name && (
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                      Classifica: {entry.qualified_team_name}
+                                    </Typography>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      {group !== predictionPointGroups[predictionPointGroups.length - 1] && <Divider sx={{ mt: 2 }} />}
+                    </Box>
+                  ))}
+                </Stack>
               ) : (
                 <TableContainer component={Paper} sx={{ boxShadow: 'none' }}>
                   <Table size="small">

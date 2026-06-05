@@ -43,6 +43,106 @@ def get_password_reset_link(token: str) -> str:
     base_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     return f"{base_url}/reset-password?token={token}"
 
+def get_admin_payments_link() -> str:
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return f"{base_url}/admin?tab=payments"
+
+def admin_registration_notifications_enabled() -> bool:
+    return os.getenv("ADMIN_REGISTRATION_NOTIFY_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+
+def get_admin_registration_notification_recipients(db: Session) -> list[str]:
+    configured = os.getenv("ADMIN_REGISTRATION_NOTIFY_TO", "").strip()
+    if configured:
+        return [email.strip() for email in configured.split(",") if email.strip()]
+
+    admins = db.query(User.email).filter(
+        User.role == "system_admin",
+        User.is_active == True
+    ).all()
+    return [email for (email,) in admins if email]
+
+def send_admin_registration_notification_email(user: User, recipients: list[str], registration_method: str) -> bool:
+    import logging
+
+    if not recipients:
+        return False
+
+    logger = logging.getLogger("bolao_registration_notification")
+    smtp_host = os.getenv("SMTP_HOST", "172.25.0.1")
+    smtp_port = int(os.getenv("SMTP_PORT", "25"))
+    from_domain = os.getenv("FROM_DOMAIN", "bru.to")
+    sender_email = os.getenv("SMTP_FROM", f"no-reply@{from_domain}")
+    admin_link = get_admin_payments_link()
+
+    safe_display_name = html.escape(user.display_name)
+    safe_username = html.escape(user.username)
+    safe_email = html.escape(user.email)
+    safe_role = html.escape(user.role)
+    method_label = "Convite individual" if registration_method == "invitation" else "Link de cadastro"
+    safe_method = html.escape(method_label)
+    safe_admin_link = html.escape(admin_link, quote=True)
+    safe_created_at = html.escape(user.created_at.strftime("%d/%m/%Y %H:%M:%S UTC") if user.created_at else "")
+
+    message = MIMEMultipart("alternative")
+    message["Subject"] = f"Novo cadastro no Bolão Copa 2026 - {user.display_name}"
+    message["From"] = sender_email
+    message["To"] = ", ".join(recipients)
+
+    text = (
+        "Novo cadastro realizado no Bolão Copa 2026.\n\n"
+        f"Nome: {user.display_name}\n"
+        f"Usuário: {user.username}\n"
+        f"E-mail: {user.email}\n"
+        f"Perfil: {user.role}\n"
+        f"Método: {method_label}\n"
+        f"Criado em: {safe_created_at}\n\n"
+        f"Painel de pagamentos: {admin_link}"
+    )
+    html_body = f"""\
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #111827; background: #f9fafb; padding: 24px;">
+        <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+          <div style="background: #0f172a; color: #ffffff; padding: 20px 24px;">
+            <h1 style="margin: 0; font-size: 20px;">Novo cadastro no Bolão Copa 2026</h1>
+          </div>
+          <div style="padding: 24px;">
+            <p style="margin-top: 0;">Um novo usuário acabou de se cadastrar.</p>
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Nome</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_display_name}</td></tr>
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Usuário</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_username}</td></tr>
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">E-mail</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_email}</td></tr>
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Perfil</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_role}</td></tr>
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Origem</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_method}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Criado em</td><td style="padding: 8px;">{safe_created_at}</td></tr>
+            </table>
+            <p>Use o painel de pagamentos para acompanhar a situação do cadastro e aprovar o pagamento quando necessário.</p>
+            <p>
+              <a href="{safe_admin_link}" style="background: #10b981; color: white; padding: 12px 18px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Abrir pagamentos</a>
+            </p>
+            <p style="font-size: 13px; color: #6b7280;">Se o botão não funcionar, copie e cole este endereço no navegador:<br>{safe_admin_link}</p>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    message.attach(MIMEText(text, "plain", "utf-8"))
+    message.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            if os.getenv("SMTP_STARTTLS", "false").lower() == "true":
+                server.starttls()
+            username = os.getenv("SMTP_USERNAME")
+            password = os.getenv("SMTP_PASSWORD")
+            if username and password:
+                server.login(username, password)
+            server.sendmail(sender_email, recipients, message.as_string())
+        return True
+    except Exception as e:
+        logger.error(f"Falha ao enviar e-mail de novo cadastro para administradores: {str(e)}")
+        return False
+
 def send_password_reset_email(email: str, display_name: str, token: str) -> bool:
     import logging
 
@@ -210,6 +310,8 @@ def register(
         invitation.used_at = datetime.utcnow()
         db.commit()
 
+    registration_method = "invitation" if invitation else "registration_link"
+
     # Log action
     audit = AuditLog(
         user_id=new_user.id,
@@ -220,11 +322,15 @@ def register(
             "username": new_user.username,
             "role": new_user.role,
             "is_active": new_user.is_active,
-            "registration_method": "invitation" if invitation else "registration_link"
+            "registration_method": registration_method
         }
     )
     db.add(audit)
     db.commit()
+
+    if user_count > 0 and admin_registration_notifications_enabled():
+        recipients = get_admin_registration_notification_recipients(db)
+        send_admin_registration_notification_email(new_user, recipients, registration_method)
 
     return new_user
 

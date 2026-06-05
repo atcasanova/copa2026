@@ -17,10 +17,12 @@ from ..schemas import (
     SystemInvitationCreate, SystemInvitationResponse, MatchScoreBatchUpdate, MatchScoreUpdate
 )
 from ..auth import require_system_admin, require_score_admin, require_participant
-from ..scoring import recalculate_match_predictions, recalculate_all_predictions_and_rankings, get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache
+from ..scoring import recalculate_match_predictions, recalculate_all_predictions_and_rankings, get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache, capture_ranking_snapshot
 from ..sync import seed_initial_data, sync_openfootball_data
 from ..settings import get_prediction_lock_hours, set_prediction_lock_hours, MAX_PREDICTION_LOCK_HOURS
 from ..notifications import send_general_ranking_notification
+from ..football_data import sync_finished_scores_from_football_data
+from .utils import user_name_sort_key
 
 def sanitize_csv_value(val) -> str:
     if val is None:
@@ -119,6 +121,7 @@ def update_match_score(
 
     # Recalculate predictions
     recalculate_match_predictions(db, match.id)
+    capture_ranking_snapshot(db)
     send_general_ranking_notification(db)
 
     return match
@@ -146,6 +149,7 @@ def update_match_scores_batch(
         db.refresh(match)
         recalculate_match_predictions(db, match.id)
 
+    capture_ranking_snapshot(db)
     send_general_ranking_notification(db)
     return updated_matches
 
@@ -183,6 +187,7 @@ def confirm_match_score(
 
     # Force final recalculation
     recalculate_match_predictions(db, match.id)
+    capture_ranking_snapshot(db)
 
     return match
 
@@ -227,8 +232,16 @@ def change_match_status(
 
     # Recalculate predictions
     recalculate_match_predictions(db, match.id)
+    capture_ranking_snapshot(db)
 
     return match
+
+@router.post("/football-data/check-scores")
+def check_football_data_scores(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    return sync_finished_scores_from_football_data(db)
 
 # ==========================================
 # 2. Openfootball Integration
@@ -279,6 +292,30 @@ def get_pending_sync_diffs(
     current_user: User = Depends(require_score_admin)
 ):
     return db.query(SyncMatchDiff).filter(SyncMatchDiff.status == "pending_review").all()
+
+
+@router.get("/notifications/summary")
+def get_admin_notifications_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    pending_sync_diffs = db.query(SyncMatchDiff).filter(
+        SyncMatchDiff.status == "pending_review"
+    ).count()
+    pending_score_reviews = db.query(Match).filter(
+        Match.status == "score_pending_review"
+    ).count()
+    pending_payment_approvals = db.query(User).filter(
+        User.payment_status == "submitted"
+    ).count()
+
+    total = pending_sync_diffs + pending_score_reviews + pending_payment_approvals
+    return {
+        "total": total,
+        "pending_sync_diffs": pending_sync_diffs,
+        "pending_score_reviews": pending_score_reviews,
+        "pending_payment_approvals": pending_payment_approvals,
+    }
 
 @router.post("/sync/diffs/{diff_id}/apply")
 def apply_sync_diff(
@@ -467,6 +504,7 @@ def update_stage_multiplier(
     
     # Automatic prediction and ranking recalculation is triggered immediately
     recalculate_all_predictions_and_rankings(db)
+    capture_ranking_snapshot(db)
     
     return existing
 
@@ -483,6 +521,7 @@ def trigger_recalculate_all(
     current_user: User = Depends(require_score_admin)
 ):
     recalculate_all_predictions_and_rankings(db)
+    capture_ranking_snapshot(db)
     
     audit = AuditLog(
         user_id=current_user.id,
@@ -555,7 +594,7 @@ def list_users(
             (User.display_name.ilike(f"%{search}%")) |
             (User.email.ilike(f"%{search}%"))
         )
-    return query.order_by(User.username.asc()).all()
+    return sorted(query.all(), key=user_name_sort_key)
 
 @router.post("/users/{user_id}/role", response_model=UserResponse)
 def change_user_role(

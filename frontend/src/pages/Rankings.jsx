@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Box, Card, CardContent, Typography, Tabs, Tab, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, MenuItem, Select, FormControl, InputLabel,
-  Avatar, Alert, Skeleton, Grid, Tooltip
+  Avatar, Alert, Skeleton, Grid, Tooltip, Checkbox, FormControlLabel, Stack
 } from '@mui/material'
 import {
   EmojiEvents as TrophyIcon,
@@ -26,6 +26,9 @@ export default function Rankings() {
   
   // Standings data
   const [rankingData, setRankingData] = useState([])
+  const [rankingHistory, setRankingHistory] = useState({ dates: [], participants: [] })
+  const [selectedChartUsers, setSelectedChartUsers] = useState({})
+  const [historyLoading, setHistoryLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -69,8 +72,37 @@ export default function Rankings() {
     }
   }
 
+  const loadRankingHistory = async () => {
+    try {
+      setHistoryLoading(true)
+      const res = await axios.get('/api/rankings/history')
+      setRankingHistory(res.data)
+      setSelectedChartUsers(prev => {
+        const hasSelection = Object.keys(prev).length > 0
+        if (hasSelection) {
+          const next = {}
+          res.data.participants.forEach(participant => {
+            next[participant.user_id] = prev[participant.user_id] ?? false
+          })
+          return next
+        }
+
+        const initial = {}
+        res.data.participants.forEach(participant => {
+          initial[participant.user_id] = Boolean(participant.is_default_visible)
+        })
+        return initial
+      })
+    } catch (err) {
+      setRankingHistory({ dates: [], participants: [] })
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
   useEffect(() => {
     loadFilterOptions()
+    loadRankingHistory()
   }, [])
 
   useEffect(() => {
@@ -96,6 +128,53 @@ export default function Rankings() {
     if (idx === 1) return { src: '/prata.png', label: 'Prata' }
     if (idx === 2) return { src: '/bronze.png', label: 'Bronze' }
     return null
+  }
+
+  const chartParticipants = rankingHistory.participants.filter(participant => selectedChartUsers[participant.user_id])
+  const maxChartPosition = Math.max(
+    1,
+    ...rankingHistory.participants.flatMap(participant => participant.snapshots.map(snapshot => snapshot.position))
+  )
+  const chartColors = ['#10b981', '#f59e0b', '#60a5fa', '#f472b6', '#a78bfa', '#f87171', '#34d399', '#facc15', '#38bdf8', '#fb7185']
+
+  const getChartColor = (index) => chartColors[index % chartColors.length]
+
+  const formatChartDate = (date) => {
+    const parsed = new Date(`${date}T00:00:00`)
+    return parsed.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  }
+
+  const getParticipantPath = (participant, width, height, padding) => {
+    if (!rankingHistory.dates.length || !participant.snapshots.length) return ''
+    const snapshotByDate = Object.fromEntries(participant.snapshots.map(snapshot => [snapshot.date, snapshot]))
+    const points = rankingHistory.dates
+      .map((date, index) => {
+        const snapshot = snapshotByDate[date]
+        if (!snapshot) return null
+        const x = rankingHistory.dates.length === 1
+          ? width / 2
+          : padding.left + (index / (rankingHistory.dates.length - 1)) * (width - padding.left - padding.right)
+        const y = padding.top + ((snapshot.position - 1) / Math.max(1, maxChartPosition - 1)) * (height - padding.top - padding.bottom)
+        return { x, y, snapshot, date }
+      })
+      .filter(Boolean)
+
+    return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
+  }
+
+  const getParticipantPoints = (participant, width, height, padding) => {
+    const snapshotByDate = Object.fromEntries(participant.snapshots.map(snapshot => [snapshot.date, snapshot]))
+    return rankingHistory.dates
+      .map((date, index) => {
+        const snapshot = snapshotByDate[date]
+        if (!snapshot) return null
+        const x = rankingHistory.dates.length === 1
+          ? width / 2
+          : padding.left + (index / (rankingHistory.dates.length - 1)) * (width - padding.left - padding.right)
+        const y = padding.top + ((snapshot.position - 1) / Math.max(1, maxChartPosition - 1)) * (height - padding.top - padding.bottom)
+        return { x, y, snapshot, date }
+      })
+      .filter(Boolean)
   }
 
   return (
@@ -158,6 +237,162 @@ export default function Rankings() {
                 ))}
               </Select>
             </FormControl>
+          </CardContent>
+        </Card>
+      )}
+
+      {tabIndex === 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 2 }}>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+                  Evolução da classificação
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Posição geral por snapshot diário. A posição 1 aparece no topo.
+                </Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                Padrão: você e os 5 primeiros
+              </Typography>
+            </Box>
+
+            {historyLoading ? (
+              <Skeleton variant="rectangular" height={320} sx={{ borderRadius: 2 }} />
+            ) : rankingHistory.dates.length === 0 || rankingHistory.participants.length === 0 ? (
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                Ainda não há snapshots de classificação suficientes para montar o histórico.
+              </Alert>
+            ) : (
+              <Grid container spacing={2}>
+                <Grid item xs={12} lg={8}>
+                  <Box sx={{ overflowX: 'auto', border: '1px solid #1f2937', borderRadius: 2, bgcolor: 'background.default' }}>
+                    <Box
+                      component="svg"
+                      viewBox="0 0 900 340"
+                      role="img"
+                      aria-label="Gráfico de evolução de posições no ranking"
+                      sx={{ display: 'block', minWidth: 720, width: '100%', height: 340 }}
+                    >
+                      {(() => {
+                        const width = 900
+                        const height = 340
+                        const padding = { top: 28, right: 28, bottom: 54, left: 54 }
+                        const chartWidth = width - padding.left - padding.right
+                        const chartHeight = height - padding.top - padding.bottom
+                        const yTicks = Array.from(
+                          new Set([1, Math.ceil(maxChartPosition / 2), maxChartPosition].filter(value => value >= 1))
+                        )
+
+                        return (
+                          <>
+                            <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#374151" />
+                            <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#374151" />
+
+                            {yTicks.map(position => {
+                              const y = padding.top + ((position - 1) / Math.max(1, maxChartPosition - 1)) * chartHeight
+                              return (
+                                <g key={position}>
+                                  <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="#1f2937" strokeDasharray="4 6" />
+                                  <text x={padding.left - 10} y={y + 4} textAnchor="end" fill="#9ca3af" fontSize="12">
+                                    {position}º
+                                  </text>
+                                </g>
+                              )
+                            })}
+
+                            {rankingHistory.dates.map((date, index) => {
+                              const x = rankingHistory.dates.length === 1
+                                ? width / 2
+                                : padding.left + (index / (rankingHistory.dates.length - 1)) * chartWidth
+                              return (
+                                <g key={date}>
+                                  <line x1={x} y1={padding.top} x2={x} y2={height - padding.bottom} stroke="#111827" />
+                                  <text x={x} y={height - 20} textAnchor="middle" fill="#9ca3af" fontSize="12">
+                                    {formatChartDate(date)}
+                                  </text>
+                                </g>
+                              )
+                            })}
+
+                            {chartParticipants.map((participant) => {
+                              const color = getChartColor(rankingHistory.participants.findIndex(item => item.user_id === participant.user_id))
+                              const points = getParticipantPoints(participant, width, height, padding)
+                              return (
+                                <g key={participant.user_id}>
+                                  <path
+                                    d={getParticipantPath(participant, width, height, padding)}
+                                    fill="none"
+                                    stroke={color}
+                                    strokeWidth="2.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  {points.map(point => (
+                                    <circle
+                                      key={`${participant.user_id}-${point.date}`}
+                                      cx={point.x}
+                                      cy={point.y}
+                                      r="4.5"
+                                      fill={color}
+                                      stroke="#0b0f19"
+                                      strokeWidth="2"
+                                    >
+                                      <title>{`${participant.display_name}: ${point.snapshot.position}º em ${formatChartDate(point.date)} (${point.snapshot.total_points} pts)`}</title>
+                                    </circle>
+                                  ))}
+                                </g>
+                              )
+                            })}
+                          </>
+                        )
+                      })()}
+                    </Box>
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12} lg={4}>
+                  <Box sx={{ maxHeight: 340, overflowY: 'auto', pr: 1 }}>
+                    <Stack spacing={0.5}>
+                      {rankingHistory.participants.map((participant, index) => (
+                        <FormControlLabel
+                          key={participant.user_id}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={Boolean(selectedChartUsers[participant.user_id])}
+                              onChange={(event) => {
+                                setSelectedChartUsers(prev => ({
+                                  ...prev,
+                                  [participant.user_id]: event.target.checked
+                                }))
+                              }}
+                              sx={{
+                                color: getChartColor(index),
+                                '&.Mui-checked': { color: getChartColor(index) }
+                              }}
+                            />
+                          }
+                          label={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Avatar src={participant.avatar_url || ''} sx={{ width: 22, height: 22, fontSize: 12 }}>
+                                {participant.display_name.charAt(0).toUpperCase()}
+                              </Avatar>
+                              <Typography variant="body2" noWrap>
+                                {participant.display_name}
+                                {participant.user_id === user?.id ? ' (você)' : ''}
+                              </Typography>
+                            </Box>
+                          }
+                          sx={{ m: 0, minWidth: 0 }}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+                </Grid>
+              </Grid>
+            )}
           </CardContent>
         </Card>
       )}

@@ -1,8 +1,9 @@
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from .models import Match, Prediction, User, StageMultiplier, AuditLog, RankingCache
+from .models import Match, Prediction, User, StageMultiplier, AuditLog, RankingCache, RankingSnapshot
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from .settings import get_locked_match_cutoff
 
 # Default multipliers as positive floats
@@ -14,6 +15,8 @@ DEFAULT_MULTIPLIERS = {
     "Semi-finals": 5.0,
     "Final": 6.0
 }
+
+LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 def get_stage_multiplier(db: Session, stage: str) -> Decimal:
     """
@@ -368,6 +371,29 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
         db.rollback()
 
     return ranking_list
+
+
+def capture_ranking_snapshot(db: Session, snapshot_date=None) -> int:
+    if snapshot_date is None:
+        snapshot_date = datetime.now(LOCAL_TIMEZONE).date()
+
+    ranking = get_rankings(db)
+    db.query(RankingSnapshot).filter(RankingSnapshot.snapshot_date == snapshot_date).delete(synchronize_session=False)
+
+    for row in ranking:
+        db.add(RankingSnapshot(
+            snapshot_date=snapshot_date,
+            user_id=row["user_id"],
+            display_name=row["display_name"],
+            avatar_url=row["avatar_url"],
+            position=row["position"],
+            total_points=row["total_points"],
+            exact_scores_count=row["exact_scores_count"],
+            correct_results_count=row["correct_results_count"],
+        ))
+
+    db.commit()
+    return len(ranking)
 
 def map_round_to_stage(round_str: str) -> str:
     """

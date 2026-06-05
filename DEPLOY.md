@@ -63,6 +63,7 @@ ADMIN_BOOTSTRAP_PASSWORD=DefinaUmaSenhaForteParaOAdmin2026!
 TEAMS_JSON_URL=https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.teams.json
 STADIUMS_JSON_URL=https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.stadiums.json
 MATCHES_JSON_URL=https://raw.githubusercontent.com/openfootball/worldcup.json/refs/heads/master/2026/worldcup.json
+OPENFOOTBALL_DAILY_SYNC_ENABLED=false
 
 # SMTP para reset de senha
 SMTP_HOST=mail.example.internal
@@ -74,6 +75,10 @@ FROM_DOMAIN=meudominio.com
 SMTP_FROM=bolao@meudominio.com
 FRONTEND_URL=https://bolao.meudominio.com
 
+# Notificação por e-mail para administradores quando houver novo cadastro
+ADMIN_REGISTRATION_NOTIFY_ENABLED=true
+ADMIN_REGISTRATION_NOTIFY_TO=
+
 # Notificações WhatsApp via API interna
 WHATSAPP_NOTIFY_ENABLED=false
 WHATSAPP_NOTIFY_URL=http://whatsgo-bot-1:9999/internal/v1/send
@@ -82,6 +87,13 @@ WHATSAPP_NOTIFY_TO=120363000000000000@g.us
 WHATSAPP_NOTIFY_SEND_AS=text
 WHATSAPP_NOTIFY_TIMEOUT_SECONDS=5
 WHATSAPP_GROUP_CHAT=https://chat.whatsapp.com/SEU_CODIGO_DE_CONVITE
+
+# Placar automático via football-data.org
+FOOTBALL_DATA_ENABLED=true
+FOOTBALL_DATA_API=TOKEN_FOOTBALL_DATA_ORG
+FOOTBALL_DATA_COMPETITION=WC
+FOOTBALL_DATA_TIMEOUT_SECONDS=10
+FOOTBALL_DATA_MAX_REQUESTS_PER_RUN=8
 
 # Auditoria externa dos palpites no GitHub
 GITHUB_AUDIT=true
@@ -176,6 +188,23 @@ Requisitos:
 - `GITHUB_TOKEN` com permissão de leitura/escrita em **Contents** no repositório alvo.
 
 Cada bloco será salvo em `blocks/block_XXXXXX_match_YY.json` com payload dos palpites, hash anterior, hash atual e metadados da partida. Se a publicação falhar, o sistema mantém o bloco local e registra o erro nos logs do backend.
+
+---
+
+### Placar automático via football-data.org
+
+Configure `FOOTBALL_DATA_API` no `.env` e garanta que o `backend` receba essa variável no `docker-compose.yml`. Com `FOOTBALL_DATA_ENABLED=true`, o backend consulta o football-data.org a cada minuto para jogos sem placar iniciados há pelo menos 2 horas. O limite padrão é de 8 chamadas HTTP por execução (`FOOTBALL_DATA_MAX_REQUESTS_PER_RUN=8`) para ficar abaixo do plano free de 10 requisições por minuto.
+
+Quando vários jogos têm o mesmo horário de início, o sistema só salva os placares e recalcula o ranking quando todos daquele horário estiverem com status `FINISHED` na API. Em mata-mata, o sistema usa `score.regularTime` quando houver prorrogação ou pênaltis, ignorando os gols posteriores ao tempo regulamentar.
+
+Com essa integração ativa, mantenha `OPENFOOTBALL_DAILY_SYNC_ENABLED=false` para evitar duas fontes automáticas de placar. O openfootball continua disponível para seed inicial e sincronização manual pelo painel administrativo.
+
+Para testar manualmente com um token de admin/score admin:
+
+```bash
+curl -X POST "https://SEU_DOMINIO/api/admin/football-data/check-scores" \
+  -H "Authorization: Bearer SEU_TOKEN_JWT"
+```
 
 ---
 

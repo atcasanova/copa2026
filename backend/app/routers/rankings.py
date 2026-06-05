@@ -2,13 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from ..db import get_db
 from ..scoring import get_rankings
 from ..schemas import RankingRowResponse
 from ..auth import get_current_active_user
-from ..models import Group, GroupMember
+from ..models import Group, GroupMember, RankingSnapshot
 
 router = APIRouter(prefix="/api/rankings", tags=["Rankings"])
+LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 @router.get("/general", response_model=List[RankingRowResponse])
 def get_general_ranking(
@@ -54,6 +57,70 @@ def get_date_ranking(
     current_user = Depends(get_current_active_user)
 ):
     return get_rankings(db, date_str=date)
+
+@router.get("/history")
+def get_ranking_history(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    rows = db.query(RankingSnapshot).order_by(
+        RankingSnapshot.snapshot_date.asc(),
+        RankingSnapshot.position.asc(),
+        RankingSnapshot.display_name.asc()
+    ).all()
+
+    current_ranking = get_rankings(db)
+    today = datetime.now(LOCAL_TIMEZONE).date()
+    has_today_snapshot = any(row.snapshot_date == today for row in rows)
+    if not has_today_snapshot:
+        for row in current_ranking:
+            rows.append(type("CurrentSnapshot", (), {
+                "snapshot_date": today,
+                "user_id": row["user_id"],
+                "display_name": row["display_name"],
+                "avatar_url": row["avatar_url"],
+                "position": row["position"],
+                "total_points": row["total_points"],
+                "exact_scores_count": row["exact_scores_count"],
+                "correct_results_count": row["correct_results_count"],
+            })())
+
+    dates = sorted({row.snapshot_date for row in rows})
+    current_top_ids = {str(row["user_id"]) for row in current_ranking[:5]}
+    current_user_id = str(current_user.id)
+    participants: dict[str, dict] = {}
+
+    for row in rows:
+        user_id = str(row.user_id)
+        if user_id not in participants:
+            participants[user_id] = {
+                "user_id": user_id,
+                "display_name": row.display_name,
+                "avatar_url": row.avatar_url,
+                "is_default_visible": user_id == current_user_id or user_id in current_top_ids,
+                "snapshots": []
+            }
+        participants[user_id]["snapshots"].append({
+            "date": row.snapshot_date.isoformat(),
+            "position": row.position,
+            "total_points": row.total_points,
+            "exact_scores_count": row.exact_scores_count,
+            "correct_results_count": row.correct_results_count,
+        })
+
+    def latest_position(participant: dict) -> int:
+        if not participant["snapshots"]:
+            return 999999
+        return participant["snapshots"][-1]["position"]
+
+    ordered_participants = sorted(
+        participants.values(),
+        key=lambda item: (latest_position(item), item["display_name"].lower())
+    )
+    return {
+        "dates": [date.isoformat() for date in dates],
+        "participants": ordered_participants,
+    }
 
 @router.get("/me")
 def get_my_ranking_positions(

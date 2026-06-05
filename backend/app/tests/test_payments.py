@@ -1,5 +1,5 @@
 import pytest
-from app.models import User, PixConfig, Match, Team, Stadium
+from app.models import AuditLog, User, PixConfig, Match, Team, Stadium
 from app.auth import get_password_hash
 import io
 from PIL import Image
@@ -42,6 +42,28 @@ def test_pix_config_flow(client, db_session, test_users):
     assert copia_cola != ""
     assert "br.gov.bcb.pix" in copia_cola
     assert "BOLAO MERCHANT" in copia_cola
+
+
+def test_admin_payment_list_is_sorted_ignoring_case_and_accents(client, db_session, test_users):
+    admin = test_users[0]
+    password = get_password_hash("password")
+    db_session.add_all([
+        User(username="sortpay_1", email="sortpay1@test.com", display_name="bruno", hashed_password=password, payment_status="pending"),
+        User(username="sortpay_2", email="sortpay2@test.com", display_name="Álvaro", hashed_password=password, payment_status="pending"),
+        User(username="sortpay_3", email="sortpay3@test.com", display_name="alberto", hashed_password=password, payment_status="pending"),
+        User(username="sortpay_4", email="sortpay4@test.com", display_name="Cézar", hashed_password=password, payment_status="pending"),
+    ])
+    db_session.commit()
+
+    res = client.get("/api/payments/admin/list", headers=get_auth_headers(client, admin.username))
+
+    assert res.status_code == 200
+    sorted_names = [
+        u["display_name"]
+        for u in res.json()
+        if u["username"].startswith("sortpay_")
+    ]
+    assert sorted_names == ["alberto", "Álvaro", "bruno", "Cézar"]
 
 def test_proof_upload_validation(client, db_session, test_users):
     admin = test_users[0]
@@ -181,6 +203,23 @@ def test_admin_approve_reject_flow(client, db_session, test_users):
     db_session.refresh(p1)
     assert p1.payment_status == "approved"
 
+    # 3. Admin reverts approval back to review state
+    res_revert = client.post(f"/api/payments/admin/revert/{p1.id}", headers=admin_headers)
+    assert res_revert.status_code == 200
+    assert res_revert.json()["payment_status"] == "submitted"
+    assert res_revert.json()["payment_rejected_reason"] is None
+
+    db_session.refresh(p1)
+    assert p1.payment_status == "submitted"
+    audit = db_session.query(AuditLog).filter(AuditLog.action == "payment_revert_approval").first()
+    assert audit is not None
+    assert audit.old_value == {"payment_status": "approved"}
+    assert audit.new_value == {"payment_status": "submitted"}
+
+    # 4. Reverting a non-approved payment is rejected
+    res_revert_again = client.post(f"/api/payments/admin/revert/{p1.id}", headers=admin_headers)
+    assert res_revert_again.status_code == 400
+
 
 def test_payment_approval_sends_notification(client, db_session, test_users, monkeypatch):
     admin = test_users[0]
@@ -204,6 +243,8 @@ def test_payment_approval_sends_notification(client, db_session, test_users, mon
     monkeypatch.setenv("WHATSAPP_NOTIFY_TO", "120363407064163865@g.us")
     monkeypatch.setattr("app.notifications.requests.post", fake_post)
 
+    config = db_session.query(PixConfig).filter(PixConfig.id == 1).first()
+    config.entry_fee = 100
     p1.payment_status = "submitted"
     p1.display_name = "Ana  Teste"
     db_session.commit()
@@ -215,7 +256,12 @@ def test_payment_approval_sends_notification(client, db_session, test_users, mon
     assert captured["url"] == "http://notify.test/internal/v1/send"
     assert captured["headers"] == {"Authorization": "Bearer secret-token"}
     assert captured["files"]["to"] == (None, "120363407064163865@g.us")
-    assert captured["files"]["text"] == (None, "\U0001f4b0 Pagamento de Ana Teste foi aprovado!")
+    message = captured["files"]["text"][1]
+    assert "\U0001f4b0 Pagamento de Ana Teste foi aprovado!" in message
+    assert "total na poupança do Gliva: *R$ 200,00*" in message
+    assert "\U0001f947 1º lugar: R$ 100,00" in message
+    assert "\U0001f948 2º lugar: R$ 60,00" in message
+    assert "\U0001f949 3º lugar: R$ 40,00" in message
     assert captured["files"]["sendAs"] == (None, "text")
     assert captured["timeout"] == 5.0
 

@@ -22,6 +22,21 @@ def test_login_accepts_email_identifier(client, test_users):
     assert login_res.json()["access_token"]
 
 
+def test_ranking_history_includes_current_user_by_default(client, test_users):
+    participant = test_users[2]
+    login_res = client.post("/api/auth/login", data={"username": participant.username, "password": "password"})
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+    res = client.get("/api/rankings/history", headers=headers)
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["dates"]
+    current_user_entry = next(item for item in payload["participants"] if item["user_id"] == str(participant.id))
+    assert current_user_entry["is_default_visible"] is True
+    assert current_user_entry["snapshots"]
+
+
 def test_calculate_base_points():
     # Exact score -> 10 points
     pts, exp = calculate_base_points(2, 1, None, 2, 1, None, False)
@@ -670,5 +685,6 @@ def test_ranking_cache_flow(client, db_session, test_users):
     score_res = client.post(f"/api/admin/matches/{match.id}/score?score_ft_team1=2&score_ft_team2=1", headers=admin_headers)
     assert score_res.status_code == 200
 
-    # Cache should be cleared (invalidated)
-    assert db_session.query(RankingCache).count() == 0
+    # Score updates invalidate and immediately repopulate the general ranking cache
+    # when the ranking snapshot is captured.
+    assert db_session.query(RankingCache).filter(RankingCache.key == "general").count() == 1
