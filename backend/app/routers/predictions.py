@@ -288,9 +288,14 @@ def get_match_prediction_visibility(
 
     locked = is_match_locked_for_predictions(db, match)
     is_scored = match.score_ft_team1 is not None and match.score_ft_team2 is not None
+    total_participants = db.query(User).filter(
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"])
+    ).count()
     predictions = db.query(Prediction).join(User, User.id == Prediction.user_id).filter(
         Prediction.match_id == match_id,
-        User.is_active == True
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"])
     ).all()
     predictions.sort(
         key=lambda pred: (
@@ -313,7 +318,7 @@ def get_match_prediction_visibility(
             "user_id": pred.user_id,
             "display_name": pred.user.display_name,
             "avatar_url": pred.user.avatar_url,
-            "created_at": pred.created_at,
+            "created_at": pred.created_at.replace(tzinfo=timezone.utc) if pred.created_at.tzinfo is None else pred.created_at.astimezone(timezone.utc),
             "goals_team1": None,
             "goals_team2": None,
             "qualified_team_name": None,
@@ -332,6 +337,7 @@ def get_match_prediction_visibility(
         "is_locked": locked,
         "is_scored": is_scored,
         "total_predictions": len(entries),
+        "total_participants": total_participants,
         "points_summary": points_summary,
         "entries": entries
     }

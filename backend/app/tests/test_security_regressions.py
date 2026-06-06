@@ -312,7 +312,9 @@ def test_match_prediction_visibility_hides_scores_before_lock(client, db_session
     assert data["is_scored"] is False
     assert data["points_summary"] == []
     assert data["total_predictions"] == 1
+    assert data["total_participants"] == 2
     assert data["entries"][0]["display_name"] == participant.display_name
+    assert data["entries"][0]["created_at"].endswith(("+00:00", "Z"))
     assert data["entries"][0]["goals_team1"] is None
     assert data["entries"][0]["goals_team2"] is None
 

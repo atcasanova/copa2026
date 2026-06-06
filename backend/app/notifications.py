@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import requests
 from sqlalchemy.orm import Session
 
-from .models import Match, PixConfig, SystemSetting, User
+from .models import Match, PixConfig, Prediction, SystemSetting, User
 from .scoring import get_rankings
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,11 @@ def _format_local_datetime(dt: datetime) -> str:
     return dt.astimezone(LOCAL_TIMEZONE).strftime("%d/%m/%Y %H:%M")
 
 
-def format_matches_reminder_message(kickoff_time: datetime, matches: list[Match]) -> str:
+def format_matches_reminder_message(
+    kickoff_time: datetime,
+    matches: list[Match],
+    missing_prediction_counts: dict[int, int] | None = None
+) -> str:
     lines = [
         "\u23f0 *Lembrete de palpites*",
         "",
@@ -131,9 +135,31 @@ def format_matches_reminder_message(kickoff_time: datetime, matches: list[Match]
         ""
     ]
     for match in matches:
-        lines.append(f"\u2022 {match.team1_name} x {match.team2_name}")
+        missing_count = (missing_prediction_counts or {}).get(match.id)
+        missing_suffix = f" - Não palpitaram: {missing_count}" if missing_count is not None else ""
+        lines.append(f"\u2022 {match.team1_name} x {match.team2_name}{missing_suffix}")
     lines.extend(["", "Entre no bolão e registre seus palpites."])
     return "\n".join(lines)
+
+
+def _participant_query(db: Session):
+    return db.query(User).filter(
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"])
+    )
+
+
+def _missing_prediction_counts(db: Session, matches: list[Match]) -> dict[int, int]:
+    total_participants = _participant_query(db).count()
+    counts = {}
+    for match in matches:
+        predicted_count = db.query(Prediction.user_id).join(User, User.id == Prediction.user_id).filter(
+            Prediction.match_id == match.id,
+            User.is_active == True,
+            User.role.notin_(["system_admin", "score_admin"])
+        ).distinct().count()
+        counts[match.id] = max(0, total_participants - predicted_count)
+    return counts
 
 
 def _reminder_setting_key(kickoff_time: datetime) -> str:
@@ -179,7 +205,8 @@ def send_due_prediction_reminders(db: Session) -> int:
         if not matches:
             continue
 
-        if send_whatsapp_message(format_matches_reminder_message(kickoff_time, matches)):
+        missing_prediction_counts = _missing_prediction_counts(db, matches)
+        if send_whatsapp_message(format_matches_reminder_message(kickoff_time, matches, missing_prediction_counts)):
             _mark_reminder_sent(db, kickoff_time)
             sent_count += 1
 
@@ -196,8 +223,15 @@ def format_ranking_message(ranking: list[dict]) -> str:
     for row in ranking[:10]:
         position = row["position"]
         prefix = medals.get(position, f"{position}.")
+        position_change = row.get("position_change")
+        movement = ""
+        if position_change:
+            if position_change > 0:
+                movement = f" \U0001f7e2\u2b06\ufe0f{position_change}"
+            else:
+                movement = f" \U0001f534\u2b07\ufe0f{abs(position_change)}"
         lines.append(
-            f"{prefix} *{row['display_name']}* - {row['total_points']} pts "
+            f"{prefix} *{row['display_name']}*{movement} - {row['total_points']} pts "
             f"({row['exact_scores_count']} exatos, {row['correct_results_count']} resultados)"
         )
     return "\n".join(lines)

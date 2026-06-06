@@ -2,7 +2,10 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from app.models import Team, Stadium, Match, Prediction, Group, GroupMember, GroupInvitation, StageMultiplier, SyncMatchDiff
-from app.scoring import calculate_base_points, score_prediction, get_rankings
+from app.scoring import (
+    calculate_base_points, score_prediction, get_rankings, invalidate_ranking_cache,
+    capture_ranking_update_snapshot
+)
 from app.sync import parse_kickoff_to_utc, ensure_team_exists, sync_openfootball_data
 
 # ==========================================
@@ -319,6 +322,141 @@ def test_ranking_tie_breakers(db_session, test_users):
     # Since they tied on points (7), exact (1), correct result (1), knockout (0), missing predictions (0)
     # Ana should rank higher because she registered earlier
     assert ana_rank["position"] < bruno_rank["position"] or (ana_rank["position"] == bruno_rank["position"] and rank.index(ana_rank) < rank.index(bruno_rank))
+
+
+def test_ranking_ignores_incomplete_same_kickoff_group(db_session, test_users):
+    ana = test_users[2]
+    db_session.add_all([
+        Team(name="Chile", group_name="A"),
+        Team(name="Peru", group_name="A"),
+        Team(name="Uruguai", group_name="A"),
+        Team(name="Equador", group_name="A"),
+        Stadium(name="Same Kickoff Stadium", city="City", timezone="UTC"),
+    ])
+    db_session.commit()
+
+    kickoff = datetime.utcnow() - timedelta(hours=3)
+    match1 = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-12",
+        time_str="15:00 UTC+0",
+        kickoff_time=kickoff,
+        team1_name="Chile",
+        team2_name="Peru",
+        ground="Same Kickoff Stadium",
+        score_ft_team1=2,
+        score_ft_team2=1,
+        status="score_pending_review"
+    )
+    match2 = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-12",
+        time_str="15:00 UTC+0",
+        kickoff_time=kickoff,
+        team1_name="Uruguai",
+        team2_name="Equador",
+        ground="Same Kickoff Stadium",
+        status="scheduled"
+    )
+    db_session.add_all([match1, match2])
+    db_session.commit()
+
+    db_session.add(Prediction(
+        match_id=match1.id,
+        user_id=ana.id,
+        goals_team1=2,
+        goals_team2=1,
+        points_earned=10,
+        base_points=10
+    ))
+    db_session.commit()
+
+    ana_rank = next(row for row in get_rankings(db_session) if row["user_id"] == ana.id)
+    assert ana_rank["total_points"] == 0
+    assert ana_rank["missing_predictions_count"] == 0
+
+    match2.score_ft_team1 = 0
+    match2.score_ft_team2 = 0
+    match2.status = "score_pending_review"
+    db_session.commit()
+    invalidate_ranking_cache(db_session)
+
+    ana_rank = next(row for row in get_rankings(db_session) if row["user_id"] == ana.id)
+    assert ana_rank["total_points"] == 10
+    assert ana_rank["missing_predictions_count"] == 1
+
+
+def test_ranking_position_change_uses_last_published_ranking(db_session, test_users):
+    ana = test_users[2]
+    bruno = test_users[3]
+    ana.created_at = datetime(2026, 5, 30, 10, 0)
+    bruno.created_at = datetime(2026, 5, 30, 11, 0)
+    db_session.add_all([
+        Team(name="Japao", group_name="A"),
+        Team(name="Coreia", group_name="A"),
+        Team(name="Egito", group_name="A"),
+        Team(name="Marrocos", group_name="A"),
+        Stadium(name="Movement Stadium", city="City", timezone="UTC"),
+    ])
+    db_session.commit()
+
+    first_match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-12",
+        time_str="15:00 UTC+0",
+        kickoff_time=datetime.utcnow() - timedelta(hours=5),
+        team1_name="Japao",
+        team2_name="Coreia",
+        ground="Movement Stadium",
+        score_ft_team1=1,
+        score_ft_team2=1,
+        status="score_confirmed"
+    )
+    second_match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-13",
+        time_str="15:00 UTC+0",
+        kickoff_time=datetime.utcnow() - timedelta(hours=3),
+        team1_name="Egito",
+        team2_name="Marrocos",
+        ground="Movement Stadium",
+        status="scheduled"
+    )
+    db_session.add_all([first_match, second_match])
+    db_session.commit()
+
+    db_session.add_all([
+        Prediction(match_id=first_match.id, user_id=ana.id, goals_team1=1, goals_team2=1, points_earned=10, base_points=10),
+        Prediction(match_id=first_match.id, user_id=bruno.id, goals_team1=2, goals_team2=1, points_earned=0, base_points=0),
+    ])
+    db_session.commit()
+    capture_ranking_update_snapshot(db_session, kickoff_time=first_match.kickoff_time)
+
+    second_match.score_ft_team1 = 2
+    second_match.score_ft_team2 = 0
+    second_match.status = "score_confirmed"
+    db_session.add(Prediction(
+        match_id=second_match.id,
+        user_id=bruno.id,
+        goals_team1=2,
+        goals_team2=0,
+        points_earned=20,
+        base_points=10
+    ))
+    db_session.commit()
+    invalidate_ranking_cache(db_session)
+    capture_ranking_update_snapshot(db_session, kickoff_time=second_match.kickoff_time)
+
+    ranking = get_rankings(db_session)
+    ana_rank = next(row for row in ranking if row["user_id"] == ana.id)
+    bruno_rank = next(row for row in ranking if row["user_id"] == bruno.id)
+    assert bruno_rank["position"] == 1
+    assert bruno_rank["position_change"] == 1
+    assert ana_rank["position_change"] == -1
 
 # ==========================================
 # 5. Group Privacy Tests

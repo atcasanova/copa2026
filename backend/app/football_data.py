@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .models import AuditLog, Match, Prediction
 from .notifications import send_general_ranking_notification
-from .scoring import capture_ranking_snapshot, invalidate_ranking_cache, score_prediction
+from .scoring import capture_ranking_snapshot, capture_ranking_update_snapshot, invalidate_ranking_cache, score_prediction
 from .sync import translate_team_name
 
 logger = logging.getLogger("football_data")
@@ -261,6 +261,7 @@ def sync_finished_scores_from_football_data(db: Session, now_utc: datetime | Non
         db.commit()
         invalidate_ranking_cache(db)
         capture_ranking_snapshot(db)
+        capture_ranking_update_snapshot(db, kickoff_time=kickoff_time)
         send_general_ranking_notification(db)
         result["updated_groups"] += 1
         result["updated_matches"] += len(matches)

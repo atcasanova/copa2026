@@ -1,10 +1,12 @@
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from .models import Match, Prediction, User, StageMultiplier, AuditLog, RankingCache, RankingSnapshot
+from .models import (
+    Match, Prediction, User, StageMultiplier, AuditLog, RankingCache,
+    RankingSnapshot, RankingUpdateSnapshot
+)
 from datetime import datetime
+from uuid import UUID
 from zoneinfo import ZoneInfo
-from .settings import get_locked_match_cutoff
 
 # Default multipliers as positive floats
 DEFAULT_MULTIPLIERS = {
@@ -17,6 +19,7 @@ DEFAULT_MULTIPLIERS = {
 }
 
 LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+RANKING_FINAL_STATUSES = ["finished", "score_confirmed", "score_pending_review"]
 
 def get_stage_multiplier(db: Session, stage: str) -> Decimal:
     """
@@ -180,8 +183,80 @@ def serialize_ranking_row(row: dict) -> dict:
         "predictions_count": row["predictions_count"],
         "missing_predictions_count": row["missing_predictions_count"],
         "registration_date": row["registration_date"].isoformat() if isinstance(row["registration_date"], datetime) else row["registration_date"],
-        "position": row["position"]
+        "position": row["position"],
+        "previous_position": row.get("previous_position"),
+        "position_change": row.get("position_change")
     }
+
+
+def is_kickoff_group_rankable(db: Session, kickoff_time: datetime) -> bool:
+    matches = db.query(Match).filter(
+        Match.kickoff_time == kickoff_time,
+        Match.status.notin_(["postponed", "cancelled"])
+    ).all()
+    if not matches:
+        return False
+    return all(
+        match.status in RANKING_FINAL_STATUSES
+        and match.score_ft_team1 is not None
+        and match.score_ft_team2 is not None
+        for match in matches
+    )
+
+
+def should_publish_ranking_update_for_matches(db: Session, matches: list[Match]) -> bool:
+    return any(is_kickoff_group_rankable(db, match.kickoff_time) for match in matches)
+
+
+def get_rankable_match_ids(db: Session, stage: str = None, date_str: str = None) -> set[int]:
+    query = db.query(Match).filter(
+        Match.status.in_(RANKING_FINAL_STATUSES),
+        Match.score_ft_team1 != None,
+        Match.score_ft_team2 != None
+    )
+    if stage:
+        query = query.filter(Match.stage == stage)
+    if date_str:
+        query = query.filter(Match.date == date_str)
+
+    candidates = query.all()
+    rankable_kickoffs = {
+        match.kickoff_time
+        for match in candidates
+        if is_kickoff_group_rankable(db, match.kickoff_time)
+    }
+    return {match.id for match in candidates if match.kickoff_time in rankable_kickoffs}
+
+
+def _latest_ranking_update_rows(db: Session) -> dict[str, RankingUpdateSnapshot]:
+    latest_key = db.query(RankingUpdateSnapshot.update_key).order_by(
+        RankingUpdateSnapshot.created_at.desc(),
+        RankingUpdateSnapshot.update_key.desc()
+    ).limit(1).scalar()
+    if not latest_key:
+        return {}
+    rows = db.query(RankingUpdateSnapshot).filter(RankingUpdateSnapshot.update_key == latest_key).all()
+    return {str(row.user_id): row for row in rows}
+
+
+def enrich_ranking_with_position_changes(db: Session, ranking: list[dict]) -> list[dict]:
+    latest_rows = _latest_ranking_update_rows(db)
+    enriched = []
+    for row in ranking:
+        next_row = dict(row)
+        snapshot = latest_rows.get(str(row["user_id"]))
+        if (
+            snapshot
+            and snapshot.position == row["position"]
+            and snapshot.total_points == row["total_points"]
+        ):
+            next_row["previous_position"] = snapshot.previous_position
+            next_row["position_change"] = snapshot.position_change
+        else:
+            next_row["previous_position"] = None
+            next_row["position_change"] = None
+        enriched.append(next_row)
+    return enriched
 
 def recalculate_match_predictions(db: Session, match_id: int) -> None:
     """
@@ -225,7 +300,7 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
     try:
         cached = db.query(RankingCache).filter(RankingCache.key == cache_key).first()
         if cached:
-            return cached.data
+            return enrich_ranking_with_position_changes(db, cached.data) if cache_key == "general" else cached.data
     except Exception:
         pass
     """
@@ -238,18 +313,8 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
     6. earliest registration date;
     7. alphabetical display name order.
     """
-    # 1. Fetch locked/finished matches count.
-    # Note: internal timestamps are in UTC.
-    lock_threshold = get_locked_match_cutoff(db)
-    
-    # Query finished or locked matches count for missing predictions tracking
-    locked_matches_query = db.query(Match).filter(Match.kickoff_time <= lock_threshold)
-    if stage:
-        locked_matches_query = locked_matches_query.filter(Match.stage == stage)
-    if date_str:
-        locked_matches_query = locked_matches_query.filter(Match.date == date_str)
-        
-    total_locked_matches = locked_matches_query.count()
+    ranked_match_ids = get_rankable_match_ids(db, stage=stage, date_str=date_str)
+    total_ranked_matches = len(ranked_match_ids)
 
     # 2. Base query for users
     users_query = db.query(User).filter(
@@ -284,6 +349,8 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
         predictions_made = len(predictions)
 
         for pred in predictions:
+            if pred.match_id not in ranked_match_ids:
+                continue
             if pred.points_earned is not None:
                 total_points += pred.points_earned
                 # Check base points to identify exact vs correct results
@@ -298,11 +365,8 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
                 if pred.match.stage != "Group Stage":
                     knockout_points += pred.points_earned
 
-        # Compute missing predictions count
-        # A prediction is missing if a match is locked/finished and the user hasn't made a prediction.
-        # So it is: total_locked_matches - predictions_made_for_locked_matches
-        pred_locked_count = pred_query.filter(Match.kickoff_time <= lock_threshold).count()
-        missing_predictions = max(0, total_locked_matches - pred_locked_count)
+        ranked_prediction_count = sum(1 for pred in predictions if pred.match_id in ranked_match_ids)
+        missing_predictions = max(0, total_ranked_matches - ranked_prediction_count)
 
         ranking_list.append({
             "user_id": user.id,
@@ -370,7 +434,7 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
     except Exception:
         db.rollback()
 
-    return ranking_list
+    return enrich_ranking_with_position_changes(db, ranking_list) if cache_key == "general" else ranking_list
 
 
 def capture_ranking_snapshot(db: Session, snapshot_date=None) -> int:
@@ -393,6 +457,35 @@ def capture_ranking_snapshot(db: Session, snapshot_date=None) -> int:
         ))
 
     db.commit()
+    return len(ranking)
+
+
+def capture_ranking_update_snapshot(db: Session, kickoff_time: datetime | None = None) -> int:
+    ranking = get_rankings(db)
+    previous_rows = _latest_ranking_update_rows(db)
+    update_key = datetime.utcnow().isoformat(timespec="microseconds")
+
+    for row in ranking:
+        previous = previous_rows.get(str(row["user_id"]))
+        previous_position = previous.position if previous else None
+        position_change = previous_position - row["position"] if previous_position is not None else None
+        user_id = UUID(row["user_id"]) if isinstance(row["user_id"], str) else row["user_id"]
+        db.add(RankingUpdateSnapshot(
+            update_key=update_key,
+            kickoff_time=kickoff_time,
+            user_id=user_id,
+            display_name=row["display_name"],
+            avatar_url=row["avatar_url"],
+            position=row["position"],
+            previous_position=previous_position,
+            position_change=position_change,
+            total_points=row["total_points"],
+            exact_scores_count=row["exact_scores_count"],
+            correct_results_count=row["correct_results_count"],
+        ))
+
+    db.commit()
+    invalidate_ranking_cache(db)
     return len(ranking)
 
 def map_round_to_stage(round_str: str) -> str:

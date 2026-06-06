@@ -288,6 +288,25 @@ class RankingSnapshot(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class RankingUpdateSnapshot(Base):
+    __tablename__ = "ranking_update_snapshots"
+    __table_args__ = (UniqueConstraint("update_key", "user_id", name="uq_ranking_update_snapshot_user"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    update_key = Column(String, nullable=False, index=True)
+    kickoff_time = Column(DateTime, nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    display_name = Column(String, nullable=False)
+    avatar_url = Column(String, nullable=True)
+    position = Column(Integer, nullable=False)
+    previous_position = Column(Integer, nullable=True)
+    position_change = Column(Integer, nullable=True)
+    total_points = Column(Integer, nullable=False)
+    exact_scores_count = Column(Integer, default=0, nullable=False)
+    correct_results_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class SystemInvitation(Base):
     __tablename__ = "system_invitations"
 

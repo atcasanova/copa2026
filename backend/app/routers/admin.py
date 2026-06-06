@@ -17,7 +17,12 @@ from ..schemas import (
     SystemInvitationCreate, SystemInvitationResponse, MatchScoreBatchUpdate, MatchScoreUpdate
 )
 from ..auth import require_system_admin, require_score_admin, require_participant
-from ..scoring import recalculate_match_predictions, recalculate_all_predictions_and_rankings, get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache, capture_ranking_snapshot
+from ..scoring import (
+    recalculate_match_predictions, recalculate_all_predictions_and_rankings,
+    get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache,
+    capture_ranking_snapshot, capture_ranking_update_snapshot,
+    should_publish_ranking_update_for_matches
+)
 from ..sync import seed_initial_data, sync_openfootball_data
 from ..settings import get_prediction_lock_hours, set_prediction_lock_hours, MAX_PREDICTION_LOCK_HOURS
 from ..notifications import send_general_ranking_notification
@@ -90,6 +95,16 @@ def _set_match_score(db: Session, match: Match, score: MatchScoreUpdate, current
     db.add(audit)
     return match
 
+
+def _publish_ranking_update_if_ready(db: Session, matches: list[Match]) -> bool:
+    if not should_publish_ranking_update_for_matches(db, matches):
+        return False
+    kickoff_time = matches[0].kickoff_time if matches else None
+    capture_ranking_snapshot(db)
+    capture_ranking_update_snapshot(db, kickoff_time=kickoff_time)
+    send_general_ranking_notification(db)
+    return True
+
 @router.post("/matches/{match_id}/score", response_model=MatchResponse)
 def update_match_score(
     match_id: int,
@@ -121,8 +136,7 @@ def update_match_score(
 
     # Recalculate predictions
     recalculate_match_predictions(db, match.id)
-    capture_ranking_snapshot(db)
-    send_general_ranking_notification(db)
+    _publish_ranking_update_if_ready(db, [match])
 
     return match
 
@@ -149,8 +163,7 @@ def update_match_scores_batch(
         db.refresh(match)
         recalculate_match_predictions(db, match.id)
 
-    capture_ranking_snapshot(db)
-    send_general_ranking_notification(db)
+    _publish_ranking_update_if_ready(db, updated_matches)
     return updated_matches
 
 @router.post("/matches/{match_id}/confirm-score", response_model=MatchResponse)
@@ -187,7 +200,7 @@ def confirm_match_score(
 
     # Force final recalculation
     recalculate_match_predictions(db, match.id)
-    capture_ranking_snapshot(db)
+    _publish_ranking_update_if_ready(db, [match])
 
     return match
 

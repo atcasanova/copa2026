@@ -164,6 +164,7 @@ class MatchPredictionVisibilityResponse(BaseModel):
     is_locked: bool
     is_scored: bool
     total_predictions: int
+    total_participants: int
     points_summary: List[MatchPredictionPointsSummary] = []
     entries: List[MatchPredictionVisibilityEntry]
 
@@ -233,6 +234,8 @@ class RankingRowResponse(BaseModel):
     predictions_count: int
     missing_predictions_count: int
     registration_date: datetime
+    previous_position: Optional[int] = None
+    position_change: Optional[int] = None
 
 # Stage Multiplier Schemas
 class StageMultiplierResponse(BaseModel):

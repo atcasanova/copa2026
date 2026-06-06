@@ -11,15 +11,13 @@ import {
   CheckCircle as CheckIcon,
   HourglassEmpty as PendingIcon,
   ErrorOutline as WarningIcon,
-  Article as ReportIcon,
-  UploadFile as UploadIcon
+  Article as ReportIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
 import GroupStandingsTable from '../components/GroupStandingsTable'
 import { getFlagUrl } from '../utils/flags'
 import { getGroupStandings, getActualScore, getPredictionScore } from '../utils/standings'
-import { analyzeExternalPredictionImport } from '../utils/predictionImport'
 import guruIcon from '../assets/guru.png'
 
 const getFlagUrlLegacy = (emoji) => {
@@ -108,14 +106,14 @@ export default function Predictions() {
   const [predictionListData, setPredictionListData] = useState(null)
   const [predictionListLoading, setPredictionListLoading] = useState(false)
   const [predictionListError, setPredictionListError] = useState('')
-  const [importOpen, setImportOpen] = useState(false)
-  const [importText, setImportText] = useState('')
-  const [importFileName, setImportFileName] = useState('')
-  const [importPreview, setImportPreview] = useState(null)
-  const [importError, setImportError] = useState('')
-  const [importSuccess, setImportSuccess] = useState('')
-  const [importSaving, setImportSaving] = useState(false)
   const [luckyRolling, setLuckyRolling] = useState({})
+
+  const parseApiDateTime = (value) => {
+    if (!value) return new Date(NaN)
+    const text = String(value)
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text)
+    return new Date(hasExplicitTimezone ? text : `${text}Z`)
+  }
 
   const autoSelectPage = (loadedMatches, mode) => {
     if (!loadedMatches || loadedMatches.length === 0) return;
@@ -350,14 +348,14 @@ export default function Predictions() {
 
   const isLocked = (kickoffTimeIso) => {
     const now = new Date()
-    const kickoff = new Date(kickoffTimeIso)
+    const kickoff = parseApiDateTime(kickoffTimeIso)
     const lockTime = new Date(kickoff.getTime() - predictionLockHours * 60 * 60 * 1000)
     return now >= lockTime
   }
 
   const isLockingSoon = (kickoffTimeIso) => {
     const now = new Date()
-    const kickoff = new Date(kickoffTimeIso)
+    const kickoff = parseApiDateTime(kickoffTimeIso)
     const lockTime = new Date(kickoff.getTime() - predictionLockHours * 60 * 60 * 1000)
     const warningTime = new Date(now.getTime() + 24 * 60 * 60 * 1000) // 24 hours warning
     return now < lockTime && lockTime <= warningTime
@@ -400,116 +398,8 @@ export default function Predictions() {
     </Tooltip>
   )
 
-  const handleOpenImport = () => {
-    setImportOpen(true)
-    setImportError('')
-    setImportSuccess('')
-  }
-
-  const handleCloseImport = () => {
-    if (importSaving) return
-    setImportOpen(false)
-    setImportText('')
-    setImportFileName('')
-    setImportPreview(null)
-    setImportError('')
-    setImportSuccess('')
-  }
-
-  const handleImportFile = async (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    setImportError('')
-    setImportSuccess('')
-    setImportPreview(null)
-    if (!file) return
-
-    if (!file.name.toLowerCase().endsWith('.json')) {
-      setImportError('Selecione um arquivo .json.')
-      return
-    }
-    if (file.size > 1024 * 1024) {
-      setImportError('Arquivo muito grande. O limite para importação é 1MB.')
-      return
-    }
-
-    try {
-      const text = await file.text()
-      setImportText(text)
-      setImportFileName(file.name)
-    } catch (err) {
-      setImportError('Não foi possível ler o arquivo selecionado.')
-    }
-  }
-
-  const handleValidateImport = () => {
-    setImportError('')
-    setImportSuccess('')
-    const preview = analyzeExternalPredictionImport({
-      rawText: importText,
-      matches,
-      isLocked
-    })
-    setImportPreview(preview)
-    if (preview.errors.length > 0) {
-      setImportError(preview.errors[0])
-      return null
-    }
-    if (preview.importable.length === 0) {
-      setImportError('Nenhum palpite importável foi encontrado nesse JSON.')
-    }
-    return preview
-  }
-
-  const handleSaveImport = async () => {
-    const preview = importPreview?.errors?.length === 0 ? importPreview : handleValidateImport()
-    if (!preview || preview.errors.length > 0 || preview.importable.length === 0) return
-
-    setImportSaving(true)
-    setImportError('')
-    setImportSuccess('')
-    try {
-      const payload = preview.importable.map(item => ({
-        match_id: item.matchId,
-        goals_team1: item.goalsTeam1,
-        goals_team2: item.goalsTeam2,
-        qualified_team_name: null
-      }))
-      const res = await axios.post('/api/predictions/bulk-save', payload)
-      const importedIds = new Set(res.data.map(item => item.match_id))
-      setPredictions(prev => {
-        const next = { ...prev }
-        res.data.forEach(item => {
-          next[item.match_id] = item
-        })
-        return next
-      })
-      setSaveStates(prev => {
-        const next = { ...prev }
-        importedIds.forEach(matchId => {
-          next[matchId] = 'saved'
-        })
-        return next
-      })
-      setImportSuccess(`${res.data.length} palpite(s) importado(s) com sucesso.`)
-      setTimeout(() => {
-        setSaveStates(prev => {
-          const next = { ...prev }
-          importedIds.forEach(matchId => {
-            if (next[matchId] === 'saved') delete next[matchId]
-          })
-          return next
-        })
-      }, 3000)
-    } catch (err) {
-      setImportError(err.response?.data?.detail || 'Não foi possível salvar os palpites importados.')
-    } finally {
-      setImportSaving(false)
-    }
-  }
-
   const formatDateTime = (isoString) => {
-    const d = new Date(isoString)
+    const d = parseApiDateTime(isoString)
     const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'America/Sao_Paulo' })
     const date = d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'numeric', timeZone: 'America/Sao_Paulo' })
     const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
@@ -676,17 +566,6 @@ export default function Predictions() {
             </Stack>
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} alignItems="flex-start" flexWrap="wrap">
-              <Button
-                variant="outlined"
-                color="primary"
-                size="small"
-                startIcon={<UploadIcon />}
-                onClick={handleOpenImport}
-                disabled={user?.role === 'system_admin' || user?.role === 'score_admin' || user?.payment_status !== 'approved'}
-                sx={{ textTransform: 'none', borderRadius: 2, minHeight: 32 }}
-              >
-                Importar palpites
-              </Button>
               <FormControlLabel
                 control={
                   <Checkbox
@@ -1158,143 +1037,9 @@ export default function Predictions() {
         {renderGroupComparison()}
       </Box>
 
-      <Dialog open={importOpen} onClose={handleCloseImport} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 800 }}>
-          Importar palpites
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2.5} sx={{ mt: 1 }}>
-            <Alert severity="info" sx={{ borderRadius: 2 }}>
-              O arquivo é validado localmente no navegador. O sistema aceita apenas o formato com <strong>data.matches[]</strong> e palpites em <strong>user_prediction.predicted_home_score</strong> e <strong>user_prediction.predicted_away_score</strong>.
-            </Alert>
-
-            {importError && <Alert severity="error" sx={{ borderRadius: 2 }}>{importError}</Alert>}
-            {importSuccess && <Alert severity="success" sx={{ borderRadius: 2 }}>{importSuccess}</Alert>}
-
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
-              <Button
-                variant="outlined"
-                component="label"
-                startIcon={<UploadIcon />}
-                sx={{ textTransform: 'none', borderRadius: 2 }}
-              >
-                Selecionar arquivo JSON
-                <input
-                  hidden
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={handleImportFile}
-                />
-              </Button>
-              {importFileName && (
-                <Typography variant="body2" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {importFileName}
-                </Typography>
-              )}
-            </Stack>
-
-            <TextField
-              label="Ou cole aqui o conteúdo JSON"
-              multiline
-              minRows={8}
-              maxRows={14}
-              value={importText}
-              onChange={(e) => {
-                if (e.target.value.length <= 1024 * 1024) {
-                  setImportText(e.target.value)
-                  setImportFileName('')
-                  setImportPreview(null)
-                  setImportError('')
-                  setImportSuccess('')
-                } else {
-                  setImportError('Conteúdo muito grande. O limite para importação é 1MB.')
-                }
-              }}
-              fullWidth
-              inputProps={{ spellCheck: 'false' }}
-            />
-
-            {importPreview && importPreview.errors.length === 0 && (
-              <Box>
-                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
-                  <Chip label={`Rodada: ${importPreview.roundName || '-'}`} size="small" />
-                  <Chip label={`${importPreview.totalMatches} jogos no arquivo`} size="small" />
-                  <Chip label={`${importPreview.predictedMatches} palpites encontrados`} color="primary" size="small" />
-                  <Chip label={`${importPreview.importable.length} importáveis`} color={importPreview.importable.length > 0 ? 'success' : 'default'} size="small" />
-                  <Chip label={`${importPreview.skipped.length} ignorados`} size="small" />
-                </Stack>
-
-                {importPreview.importable.length > 0 && (
-                  <TableContainer component={Paper} sx={{ boxShadow: 'none', maxHeight: 260 }}>
-                    <Table size="small" stickyHeader>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Jogo</TableCell>
-                          <TableCell align="center">Palpite</TableCell>
-                          <TableCell align="center">Ação</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {importPreview.importable.map(item => {
-                          const existing = predictions[item.matchId]
-                          return (
-                            <TableRow key={item.matchId}>
-                              <TableCell>
-                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                                  {item.homeTeam} x {item.awayTeam}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {formatDateTime(item.kickoffTime)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={`${item.goalsTeam1} x ${item.goalsTeam2}`}
-                                  size="small"
-                                  color="primary"
-                                  variant="outlined"
-                                  sx={{ fontWeight: 800 }}
-                                />
-                              </TableCell>
-                              <TableCell align="center">
-                                {existing ? 'Atualizar existente' : 'Criar palpite'}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-
-                {importPreview.skipped.length > 0 && (
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-                    Ignorados: {importPreview.skipped.slice(0, 5).map(item => `${item.reason} (${item.detail})`).join('; ')}
-                    {importPreview.skipped.length > 5 ? `; +${importPreview.skipped.length - 5}` : ''}
-                  </Typography>
-                )}
-              </Box>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseImport} disabled={importSaving}>Fechar</Button>
-          <Button onClick={handleValidateImport} disabled={importSaving || !importText.trim()}>
-            Validar
-          </Button>
-          <Button
-            onClick={handleSaveImport}
-            variant="contained"
-            disabled={importSaving || !importPreview || importPreview.errors.length > 0 || importPreview.importable.length === 0}
-          >
-            {importSaving ? 'Importando...' : 'Salvar palpites importados'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog open={predictionListOpen} onClose={handleClosePredictionList} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 800 }}>
-          {predictionListData?.is_locked ? 'Palpites realizados' : 'Participantes que já palpitaram'}
+          Participantes que já palpitaram ({predictionListData?.total_predictions ?? 0}/{predictionListData?.total_participants ?? '-'})
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>

@@ -7,7 +7,9 @@ import {
 import {
   EmojiEvents as TrophyIcon,
   Search as SearchIcon,
-  HelpOutline
+  HelpOutline,
+  ArrowUpward,
+  ArrowDownward
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
@@ -128,6 +130,20 @@ export default function Rankings() {
     if (idx === 1) return { src: '/prata.png', label: 'Prata' }
     if (idx === 2) return { src: '/bronze.png', label: 'Bronze' }
     return null
+  }
+
+  const getMovementIndicator = (positionChange) => {
+    if (!positionChange) return null
+    const gained = positionChange > 0
+    const amount = Math.abs(positionChange)
+    return {
+      amount,
+      color: gained ? '#22c55e' : '#ef4444',
+      icon: gained ? <ArrowUpward sx={{ fontSize: 15 }} /> : <ArrowDownward sx={{ fontSize: 15 }} />,
+      label: gained
+        ? `Ganhou ${amount} posição${amount === 1 ? '' : 'ões'} desde o último ranking`
+        : `Perdeu ${amount} posição${amount === 1 ? '' : 'ões'} desde o último ranking`
+    }
   }
 
   const chartParticipants = rankingHistory.participants.filter(participant => selectedChartUsers[participant.user_id])
@@ -450,6 +466,7 @@ export default function Rankings() {
               rankingData.map((row, index) => {
                 const isMe = row.user_id === user?.id
                 const medal = getMedal(row.user_id, row.exact_scores_count)
+                const movement = getMovementIndicator(row.position_change)
                 return (
                   <TableRow 
                     key={row.user_id}
@@ -461,19 +478,39 @@ export default function Rankings() {
                   >
                     {/* Position */}
                     <TableCell align="center" sx={{ fontWeight: 800 }}>
-                      {row.position === 1 ? (
-                        <Typography sx={{ color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
-                          🥇 1º
-                        </Typography>
-                      ) : row.position === 2 ? (
-                        <Typography sx={{ color: 'text.primary', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
-                          🥈 2º
-                        </Typography>
-                      ) : row.position === 3 ? (
-                        <Typography sx={{ color: '#cd7f32', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
-                          🥉 3º
-                        </Typography>
-                      ) : `${row.position}º`}
+                      <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
+                        {row.position === 1 ? (
+                          <Typography sx={{ color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
+                            🥇 1º
+                          </Typography>
+                        ) : row.position === 2 ? (
+                          <Typography sx={{ color: 'text.primary', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
+                            🥈 2º
+                          </Typography>
+                        ) : row.position === 3 ? (
+                          <Typography sx={{ color: '#cd7f32', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
+                            🥉 3º
+                          </Typography>
+                        ) : (
+                          <Typography sx={{ fontWeight: 900 }}>{row.position}º</Typography>
+                        )}
+                        {movement && (
+                          <Tooltip title={movement.label}>
+                            <Box sx={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 0.15,
+                              color: movement.color,
+                              fontSize: '0.78rem',
+                              fontWeight: 900,
+                              lineHeight: 1
+                            }}>
+                              {movement.icon}
+                              {movement.amount}
+                            </Box>
+                          </Tooltip>
+                        )}
+                      </Box>
                     </TableCell>
 
                     {/* Avatar & Display Name */}
