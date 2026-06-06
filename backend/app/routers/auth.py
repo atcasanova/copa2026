@@ -19,19 +19,104 @@ from email.mime.text import MIMEText
 
 # Simple in-memory rate limiting dictionary
 # Format: {ip: [timestamp1, timestamp2, ...]}
+import logging
+import ipaddress
+
+logger = logging.getLogger("bolao_auth")
+
 RATE_LIMIT_WINDOW = 60 # 1 minute
 MAX_ATTEMPTS = 15 # max 15 attempts per minute
 rate_limit_db = defaultdict(list)
+
+DEFAULT_TRUSTED_PROXIES = [
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+]
+
+def get_trusted_proxies_networks() -> list:
+    env_val = os.getenv("TRUSTED_PROXIES", "")
+    networks = []
+    if env_val:
+        items = [item.strip() for item in env_val.split(",") if item.strip()]
+    else:
+        items = DEFAULT_TRUSTED_PROXIES
+        
+    for item in items:
+        try:
+            if "/" in item:
+                networks.append(ipaddress.ip_network(item, strict=False))
+            else:
+                networks.append(ipaddress.ip_network(f"{item}/32" if ":" not in item else f"{item}/128"))
+        except ValueError:
+            pass
+    return networks
+
+def is_trusted_proxy(ip_str: str, trusted_networks: list) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        for net in trusted_networks:
+            if ip in net:
+                return True
+    except ValueError:
+        pass
+    return False
+
+def get_client_ip(request: Request) -> str:
+    peer_ip = request.client.host if request.client else "127.0.0.1"
+    
+    trusted_networks = get_trusted_proxies_networks()
+    
+    if not is_trusted_proxy(peer_ip, trusted_networks):
+        return peer_ip
+
+    # CF-Connecting-IP
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        try:
+            ipaddress.ip_address(cf_ip.strip())
+            return cf_ip.strip()
+        except ValueError:
+            pass
+
+    # X-Real-IP
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        try:
+            ipaddress.ip_address(real_ip.strip())
+            return real_ip.strip()
+        except ValueError:
+            pass
+
+    # X-Forwarded-For
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        for part in xff.split(","):
+            part_stripped = part.strip()
+            try:
+                ipaddress.ip_address(part_stripped)
+                return part_stripped
+            except ValueError:
+                pass
+
+    return peer_ip
 
 def check_rate_limit(ip: str) -> bool:
     import os
     if os.getenv("TESTING", "false").lower() == "true":
         return True
+    
+    logger.info(f"[Rate Limit] IP verificado: {ip}")
+    
     now = time.time()
     # Filter out attempts outside the window
     attempts = [t for t in rate_limit_db[ip] if now - t < RATE_LIMIT_WINDOW]
     rate_limit_db[ip] = attempts
     if len(attempts) >= MAX_ATTEMPTS:
+        logger.warning(f"[Rate Limit] IP {ip} excedeu o limite de tentativas ({len(attempts)}/{MAX_ATTEMPTS})")
         return False
     rate_limit_db[ip].append(now)
     return True
@@ -231,7 +316,7 @@ def register(
     registration_code: str = None,
     db: Session = Depends(get_db)
 ):
-    if not check_rate_limit(request.client.host if request.client else "unknown"):
+    if not check_rate_limit(get_client_ip(request)):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Muitas solicitações de registro. Por favor, tente novamente mais tarde."
@@ -336,7 +421,7 @@ def register(
 
 @router.post("/login", response_model=Token)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    if not check_rate_limit(request.client.host if request.client else "unknown"):
+    if not check_rate_limit(get_client_ip(request)):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Muitas tentativas de login. Por favor, tente novamente mais tarde."
@@ -379,7 +464,7 @@ def request_password_reset(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    if not check_rate_limit(request.client.host if request.client else "unknown"):
+    if not check_rate_limit(get_client_ip(request)):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Muitas solicitações de redefinição. Por favor, tente novamente mais tarde."
