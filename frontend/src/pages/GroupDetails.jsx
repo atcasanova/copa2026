@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Box, Card, CardContent, Grid, Typography, Button, TextField, Divider, Alert, Table,
@@ -22,6 +22,7 @@ import {
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
+import ExportElementImageButton from '../components/ExportElementImageButton'
 
 export default function GroupDetails() {
   const { groupId } = useParams()
@@ -42,6 +43,7 @@ export default function GroupDetails() {
   const [successMsg, setSuccessMsg] = useState('')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingGroup, setDeletingGroup] = useState(false)
+  const rankingCardRef = useRef(null)
 
   const loadGroupDetails = async () => {
     try {
@@ -171,24 +173,6 @@ export default function GroupDetails() {
     }
   }
 
-  const handleExportRanking = async () => {
-    try {
-      const response = await axios.get(`/api/groups/${groupId}/export/ranking`, {
-        responseType: 'blob'
-      })
-      const url = window.URL.createObjectURL(new Blob([response.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `ranking_grupo_${groupId}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-    } catch (err) {
-      alert('Erro ao exportar o ranking do grupo.')
-    }
-  }
-
   const handleExportPredictions = async () => {
     try {
       const response = await axios.get(`/api/groups/${groupId}/export/predictions`, {
@@ -254,6 +238,13 @@ export default function GroupDetails() {
     return null
   }
 
+  const rankingImageFileName = `ranking_${group.name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'grupo'}.png`
+
   return (
     <Box sx={{ mt: 1 }}>
       {/* Header Banner */}
@@ -282,14 +273,13 @@ export default function GroupDetails() {
             {/* Actions for Group Admins */}
             <Grid item xs={12} sm={4} sx={{ textAlign: { sm: 'right' } }}>
               <Stack spacing={1.5} direction={{ xs: 'column', sm: 'row' }} justifyContent={{ sm: 'flex-end' }}>
-                <Button 
-                  variant="outlined" 
-                  startIcon={<ExportIcon />}
-                  onClick={handleExportRanking}
+                <ExportElementImageButton
+                  targetRef={rankingCardRef}
+                  fileName={rankingImageFileName}
+                  shareTitle={`Ranking - ${group.name}`}
+                  label="Compartilhar Ranking"
                   size="small"
-                >
-                  Exportar Ranking
-                </Button>
+                />
                 {isGroupAdmin && (
                   <Button 
                     variant="outlined" 
@@ -313,7 +303,7 @@ export default function GroupDetails() {
       <Grid container spacing={3}>
         {/* Left Side: Rankings Table */}
         <Grid item xs={12} md={8}>
-          <Card>
+          <Card ref={rankingCardRef}>
             <CardContent sx={{ p: 4 }}>
               <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
                 🏆 Classificação dos Membros

@@ -9,7 +9,7 @@ from ..models import Prediction, Match, User, AuditLog
 from ..schemas import PredictionCreate, PredictionResponse, PredictionBulkUpdate, MatchResponse, MatchPredictionVisibilityResponse
 from ..auth import get_current_active_user
 from ..settings import get_prediction_lock_hours, get_locked_match_cutoff, is_match_locked_for_predictions
-from ..scoring import DEFAULT_MULTIPLIERS, get_stage_multiplier
+from ..scoring import DEFAULT_MULTIPLIERS, get_stage_multiplier, invalidate_ranking_cache
 from uuid import UUID
 
 router = APIRouter(prefix="/api/predictions", tags=["Predictions"])
@@ -135,6 +135,7 @@ def save_prediction(
     )
     db.add(audit)
     db.commit()
+    invalidate_ranking_cache(db)
 
     return prediction
 
@@ -154,6 +155,10 @@ def bulk_save_predictions(
             detail="Administradores não participam do bolão e não podem fazer palpites."
         )
     saved_predictions = []
+    unlocked_stages = None
+    if current_user.role not in ["system_admin", "score_admin"]:
+        from .utils import get_unlocked_stages
+        unlocked_stages = get_unlocked_stages(db)
     
     for item in predictions_in:
         match = db.query(Match).filter(Match.id == item.match_id).first()
@@ -170,9 +175,7 @@ def bulk_save_predictions(
 
         # Enforce stage unlocking validation
         if current_user.role not in ["system_admin", "score_admin"]:
-            from .utils import get_unlocked_stages
-            unlocked = get_unlocked_stages(db)
-            if match.stage not in unlocked:
+            if match.stage not in unlocked_stages:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Não foi possível salvar: A fase {match.stage} ainda está bloqueada para palpites."
@@ -227,6 +230,8 @@ def bulk_save_predictions(
         db.add(audit)
         
     db.commit()
+    if saved_predictions:
+        invalidate_ranking_cache(db)
     return saved_predictions
 
 @router.get("/missing", response_model=List[MatchResponse])

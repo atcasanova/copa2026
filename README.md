@@ -122,8 +122,8 @@ O backend pode enviar mensagens para uma API interna de WhatsApp configurada pel
 
 Eventos enviados:
 - Aprovação de pagamento: informa que o pagamento do participante foi aprovado.
-- Lembretes de palpites: enviados 2h30 antes de cada horário de jogos, com a lista das partidas daquele horário.
-- Ranking atualizado: enviado quando placares são salvos pelo administrador, com top 10 geral e medalhas nos três primeiros.
+- Lembretes de palpites: enviados 2h30 antes de cada horário de jogos, com a lista das partidas daquele horário e a quantidade de participantes que ainda não palpitaram em cada jogo.
+- Ranking atualizado: enviado quando todos os placares de um mesmo horário entram no ranking, com top 10 geral, medalhas nos três primeiros e indicadores de mudança de posição (`🟢⬆️N` para subida, `🔴⬇️N` para queda).
 
 Recomendação de Docker:
 - Se a API de WhatsApp estiver em outro Compose no mesmo host, conecte o `bolao_backend` à mesma rede Docker dessa API e use o nome do serviço na URL, por exemplo `http://whatsgo-bot-1:9999/internal/v1/send`.
@@ -192,6 +192,18 @@ O ranking oficial é calculado de forma determinística utilizando os seguintes 
 5. Menor quantidade de palpites perdidos (missing predictions) em confrontos já iniciados/bloqueados.
 6. Data de cadastro mais antiga no sistema.
 7. Ordem alfabética do nome de exibição.
+
+Atualizações e exportação:
+- Jogos que começam no mesmo horário entram no ranking apenas quando todos os jogos daquele horário estiverem completos.
+- O site mostra indicadores de ganho/perda de posição em relação ao último ranking publicado.
+- Rankings não são mais exportados em CSV pelo backend. A exportação/compartilhamento de ranking é feita no frontend como PNG da área visível, com suporte a compartilhamento mobile quando o navegador disponibiliza Web Share.
+- Ao criar ou editar palpites, o cache de ranking é invalidado para manter contadores e estatísticas atualizados.
+
+## Pagamentos no Admin
+
+- `system_admin` pode configurar Pix, listar pagamentos, aprovar, reverter aprovação e cobrar pendentes.
+- `score_admin` pode listar pagamentos, aprovar, reverter aprovação e cobrar pendentes, mas não pode alterar a configuração global do Pix.
+- Reverter um pagamento aprovado devolve o usuário para `submitted` quando há comprovante, ou `pending` quando não há.
 
 ---
 

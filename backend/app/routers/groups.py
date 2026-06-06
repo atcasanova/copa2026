@@ -618,56 +618,6 @@ def change_group_privacy(
     
     return {"message": f"Privacidade do grupo alterada para {'privado' if is_private else 'público'} com sucesso."}
 
-@router.get("/{group_id}/export/ranking")
-def export_group_ranking_csv(
-    group_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    Exports group ranking to CSV.
-    Accessible by approved group members or system admins.
-    """
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Grupo não encontrado.")
-        
-    # Check membership
-    membership = db.query(GroupMember).filter(
-        GroupMember.group_id == group_id,
-        GroupMember.user_id == current_user.id,
-        GroupMember.is_approved == True
-    ).first()
-    if not membership and current_user.role != "system_admin":
-        raise HTTPException(status_code=403, detail="Apenas membros aprovados podem exportar o ranking.")
-        
-    from ..scoring import get_rankings
-    ranking = get_rankings(db, group_id=group_id)
-    
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    writer.writerow([
-        "Posicao", "Participante", "Pontos Totais", 
-        "Placares Exatos", "Resultados Corretos", 
-        "Palpites Feitos", "Palpites Faltantes"
-    ])
-    
-    for row in ranking:
-        writer.writerow([
-            sanitize_csv_value(row["position"]),
-            sanitize_csv_value(row["display_name"]),
-            sanitize_csv_value(row["total_points"]),
-            sanitize_csv_value(row["exact_scores_count"]),
-            sanitize_csv_value(row["correct_results_count"]),
-            sanitize_csv_value(row["predictions_count"]),
-            sanitize_csv_value(row["missing_predictions_count"])
-        ])
-        
-    output.seek(0)
-    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = f"attachment; filename=ranking_grupo_{group_id}.csv"
-    return response
-
 @router.get("/{group_id}/export/predictions")
 def export_group_predictions_csv(
     group_id: UUID,

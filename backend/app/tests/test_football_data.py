@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from app.football_data import sync_finished_scores_from_football_data
-from app.models import Match, Prediction, Stadium, Team
+from app.models import FootballDataSyncLog, Match, Prediction, Stadium, Team
 
 
 class FakeResponse:
@@ -100,6 +100,13 @@ def test_football_data_updates_group_only_when_all_same_kickoff_are_finished(db_
     assert match2.score_ft_team1 == 1
     assert match2.score_ft_team2 == 1
 
+    log = db_session.query(FootballDataSyncLog).order_by(FootballDataSyncLog.started_at.desc()).first()
+    assert log is not None
+    assert log.status == "success"
+    assert log.updated_matches == 2
+    assert any("API retornou" in event["message"] for event in log.details["events"])
+    assert any(event.get("checks") for event in log.details["events"])
+
 
 def test_football_data_waits_when_one_same_kickoff_match_is_not_finished(db_session, monkeypatch):
     monkeypatch.setenv("FOOTBALL_DATA_API", "fake-token")
@@ -136,3 +143,9 @@ def test_football_data_waits_when_one_same_kickoff_match_is_not_finished(db_sess
     assert match1.score_ft_team1 is None
     assert match2.status == "scheduled"
     assert match2.score_ft_team1 is None
+
+    log = db_session.query(FootballDataSyncLog).order_by(FootballDataSyncLog.started_at.desc()).first()
+    assert log is not None
+    assert log.status == "warning"
+    assert log.updated_matches == 0
+    assert any("Nenhum placar foi aplicado" in event["message"] for event in log.details["events"])

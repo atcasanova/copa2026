@@ -322,6 +322,22 @@ class SyncLogResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class FootballDataSyncLogResponse(BaseModel):
+    id: int
+    trigger: str
+    status: str
+    checked_groups: int
+    updated_groups: int
+    updated_matches: int
+    errors: List[str] = []
+    details: Dict[str, Any] = {}
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AuditBlockResponse(BaseModel):
     id: int
     match_id: int

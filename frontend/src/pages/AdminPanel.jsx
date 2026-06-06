@@ -22,7 +22,8 @@ import {
   HourglassEmpty as PendingPaymentIcon,
   Payments as PaymentIcon,
   Mail as MailIcon,
-  Undo as RevertIcon
+  Undo as RevertIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
@@ -44,26 +45,41 @@ const compareUsersByName = (a, b) => {
   return userNameCollator.compare(a.email || '', b.email || '')
 }
 
+const getAllowedTabs = (role) => {
+  const tabs = ['matches', 'sync']
+  if (role === 'system_admin') {
+    tabs.push('scoring', 'announcements', 'users', 'audit', 'payments', 'invitations')
+  } else if (role === 'score_admin') {
+    tabs.push('payments')
+  }
+  return tabs
+}
+
 export default function AdminPanel() {
   const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   
   // Tabs: 0=Matches, 1=Sync, 2=Config, 3=Announcements, 4=Users, 5=Logs
-  const [tabIndex, setTabIndex] = useState(searchParams.get('tab') === 'payments' ? 6 : 0)
+  const [tabIndex, setTabIndex] = useState('matches')
   
   // Shared options
   const [matches, setMatches] = useState([])
   const [stages, setStages] = useState([])
 
   useEffect(() => {
-    if (searchParams.get('tab') === 'payments' && user?.role === 'system_admin') {
-      setTabIndex(6)
+    if (!user) return
+    const requestedTab = searchParams.get('tab')
+    const allowedTabs = getAllowedTabs(user.role)
+    if (requestedTab && allowedTabs.includes(requestedTab)) {
+      setTabIndex(requestedTab)
+    } else if (!allowedTabs.includes(tabIndex)) {
+      setTabIndex('matches')
     }
-  }, [searchParams, user?.role])
+  }, [searchParams, user, tabIndex])
 
   const handleTabChange = (event, value) => {
     setTabIndex(value)
-    if (value === 6) {
+    if (value === 'payments') {
       setSearchParams({ tab: 'payments' })
     } else if (searchParams.has('tab')) {
       const nextParams = new URLSearchParams(searchParams)
@@ -81,6 +97,8 @@ export default function AdminPanel() {
   const [syncDiffs, setSyncDiffs] = useState([])
   const [syncLoading, setSyncLoading] = useState(false)
   const [syncResult, setSyncResult] = useState('')
+  const [footballDataLogs, setFootballDataLogs] = useState([])
+  const [footballDataLogsLoading, setFootballDataLogsLoading] = useState(false)
 
   // 2. Multipliers State
   const [multipliers, setMultipliers] = useState([])
@@ -129,6 +147,18 @@ export default function AdminPanel() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(true)
+
+  const loadFootballDataLogs = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setFootballDataLogsLoading(true)
+      const res = await axios.get('/api/admin/football-data/logs?limit=20')
+      setFootballDataLogs(res.data)
+    } catch (err) {
+      if (!silent) setError('Erro ao carregar logs do football-data.')
+    } finally {
+      if (!silent) setFootballDataLogsLoading(false)
+    }
+  }
 
   const loadInitialData = async () => {
     try {
@@ -186,11 +216,15 @@ export default function AdminPanel() {
         // Load hidden registration link
         const regLinkRes = await axios.get('/api/admin/registration-link')
         setHiddenRegistrationLink(regLinkRes.data)
+      } else if (user?.role === 'score_admin') {
+        const paymentsRes = await axios.get('/api/payments/admin/list')
+        setPaymentUsers([...paymentsRes.data].sort(compareUsersByName))
       }
       
       // Load pending sync diffs
       const diffsRes = await axios.get('/api/admin/sync/diffs')
       setSyncDiffs(diffsRes.data)
+      await loadFootballDataLogs({ silent: true })
       
     } catch (err) {
       setError('Erro ao carregar dados do painel administrativo.')
@@ -202,6 +236,15 @@ export default function AdminPanel() {
   useEffect(() => {
     loadInitialData()
   }, [])
+
+  useEffect(() => {
+    if (tabIndex !== 'sync') return undefined
+    loadFootballDataLogs({ silent: true })
+    const intervalId = setInterval(() => {
+      loadFootballDataLogs({ silent: true })
+    }, 5000)
+    return () => clearInterval(intervalId)
+  }, [tabIndex])
 
   // Save success message alert
   const showSuccess = (msg) => {
@@ -350,9 +393,11 @@ export default function AdminPanel() {
       setSyncResult(JSON.stringify(res.data, null, 2))
       const updated = res.data?.updated_matches || 0
       showSuccess(updated > 0 ? `${updated} resultado(s) atualizado(s) pela API oficial.` : 'Consulta concluída. Nenhum resultado novo encontrado.')
+      await loadFootballDataLogs({ silent: true })
       loadInitialData()
     } catch (err) {
       setSyncResult('Erro na consulta da API oficial: ' + (err.response?.data?.detail || err.message))
+      await loadFootballDataLogs({ silent: true })
     } finally {
       setSyncLoading(false)
     }
@@ -531,7 +576,6 @@ export default function AdminPanel() {
       if (type === 'users') fileName = 'usuarios_export.csv'
       else if (type === 'predictions') fileName = 'apostas_export.csv'
       else if (type === 'scores') fileName = 'placares_export.csv'
-      else if (type === 'ranking') fileName = 'ranking_geral_export.csv'
       else if (type === 'audit-logs') fileName = 'auditoria_export.csv'
       link.setAttribute('download', fileName)
       document.body.appendChild(link)
@@ -544,7 +588,56 @@ export default function AdminPanel() {
   }
 
   const formatDateTime = (isoString) => {
-    return new Date(isoString).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+    if (!isoString) return '-'
+    const normalized = typeof isoString === 'string' && !/(z|[+-]\d{2}:?\d{2})$/i.test(isoString)
+      ? `${isoString}Z`
+      : isoString
+    return new Date(normalized).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+  }
+
+  const getFootballDataStatusColor = (status) => {
+    if (status === 'success') return 'success'
+    if (status === 'warning') return 'warning'
+    if (status === 'error') return 'error'
+    if (status === 'running') return 'info'
+    return 'default'
+  }
+
+  const getFootballDataStatusLabel = (status) => {
+    const labels = {
+      running: 'Em execução',
+      success: 'Concluído',
+      warning: 'Atenção',
+      error: 'Erro',
+      skipped: 'Ignorado'
+    }
+    return labels[status] || status || 'Desconhecido'
+  }
+
+  const renderFootballDataEventExtra = (event) => {
+    const extra = Object.fromEntries(
+      Object.entries(event).filter(([key]) => !['timestamp', 'level', 'message'].includes(key))
+    )
+    if (Object.keys(extra).length === 0) return null
+    return (
+      <Box
+        component="pre"
+        sx={{
+          mt: 1,
+          p: 1.5,
+          borderRadius: 1,
+          bgcolor: '#020617',
+          color: '#cbd5e1',
+          fontSize: '0.72rem',
+          overflowX: 'auto',
+          whiteSpace: 'pre-wrap',
+          m: 0,
+          marginTop: 1
+        }}
+      >
+        {JSON.stringify(extra, null, 2)}
+      </Box>
+    )
   }
 
   const renderScoreInput = (matchId, field, value) => (
@@ -818,14 +911,15 @@ export default function AdminPanel() {
         scrollButtons="auto"
         sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}
       >
-        <Tab icon={<MatchIcon />} label="Placares & Jogos" iconPosition="start" sx={{ fontWeight: 'bold' }} />
-        <Tab icon={<SyncIcon />} label="Sincronização" iconPosition="start" sx={{ fontWeight: 'bold' }} />
-        {user?.role === 'system_admin' && <Tab icon={<ConfigIcon />} label="Config. Pontuação" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-        {user?.role === 'system_admin' && <Tab icon={<AnnIcon />} label="Publicar Comunicados" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-	        {user?.role === 'system_admin' && <Tab icon={<PeopleIcon />} label="Usuários & Acessos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-	        {user?.role === 'system_admin' && <Tab icon={<HistoryIcon />} label="Auditoria & Exportar" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-	        {user?.role === 'system_admin' && (
+        <Tab value="matches" icon={<MatchIcon />} label="Placares & Jogos" iconPosition="start" sx={{ fontWeight: 'bold' }} />
+        <Tab value="sync" icon={<SyncIcon />} label="Sincronização" iconPosition="start" sx={{ fontWeight: 'bold' }} />
+        {user?.role === 'system_admin' && <Tab value="scoring" icon={<ConfigIcon />} label="Config. Pontuação" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+        {user?.role === 'system_admin' && <Tab value="announcements" icon={<AnnIcon />} label="Publicar Comunicados" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+	        {user?.role === 'system_admin' && <Tab value="users" icon={<PeopleIcon />} label="Usuários & Acessos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+	        {user?.role === 'system_admin' && <Tab value="audit" icon={<HistoryIcon />} label="Auditoria & Exportar" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+	        {(user?.role === 'system_admin' || user?.role === 'score_admin') && (
 	          <Tab
+              value="payments"
 	            icon={
 	              <Badge badgeContent={pendingPaymentApprovalsCount} color="warning" invisible={pendingPaymentApprovalsCount === 0} max={99}>
 	                <PaymentIcon />
@@ -836,13 +930,13 @@ export default function AdminPanel() {
 	            sx={{ fontWeight: 'bold' }}
 	          />
 	        )}
-        {user?.role === 'system_admin' && <Tab icon={<MailIcon />} label="Convites" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+        {user?.role === 'system_admin' && <Tab value="invitations" icon={<MailIcon />} label="Convites" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
       </Tabs>
 
       {/* ==========================================
           TAB 0: MATCHES / SCORE EDITING
          ========================================== */}
-      {tabIndex === 0 && (
+      {tabIndex === 'matches' && (
         <Stack spacing={3}>
           <Card>
             <CardContent sx={{ p: 2 }}>
@@ -990,7 +1084,7 @@ export default function AdminPanel() {
       {/* ==========================================
           TAB 1: INTEGRATION / SYNC
          ========================================== */}
-      {tabIndex === 1 && (
+      {tabIndex === 'sync' && (
         <Stack spacing={4}>
           <Card>
             <CardContent sx={{ p: 4 }}>
@@ -1023,6 +1117,133 @@ export default function AdminPanel() {
               <Button variant="contained" color="primary" startIcon={<SyncIcon />} onClick={handleTriggerSyncJob} disabled={syncLoading}>
                 Buscar resultados oficiais agora
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Stack spacing={3}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                  <Box>
+                    <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit' }}>
+                      Status da sincronização football-data
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Atualiza automaticamente a cada 5 segundos enquanto esta aba está aberta.
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="outlined"
+                    startIcon={<RefreshIcon />}
+                    onClick={() => loadFootballDataLogs()}
+                    disabled={footballDataLogsLoading}
+                  >
+                    Atualizar logs
+                  </Button>
+                </Box>
+
+                {footballDataLogs.length === 0 ? (
+                  <Alert severity="info">
+                    Nenhuma consulta ao football-data registrada ainda.
+                  </Alert>
+                ) : (
+                  <>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={3}>
+                        <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+                          <Typography variant="caption" color="text.secondary">Último status</Typography>
+                          <Box sx={{ mt: 1 }}>
+                            <Chip
+                              label={getFootballDataStatusLabel(footballDataLogs[0].status)}
+                              color={getFootballDataStatusColor(footballDataLogs[0].status)}
+                              size="small"
+                            />
+                          </Box>
+                        </Box>
+                      </Grid>
+                      <Grid item xs={12} sm={3}>
+                        <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+                          <Typography variant="caption" color="text.secondary">Última consulta</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700, mt: 1 }}>
+                            {formatDateTime(footballDataLogs[0].started_at)}
+                          </Typography>
+                        </Box>
+                      </Grid>
+                      <Grid item xs={6} sm={3}>
+                        <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+                          <Typography variant="caption" color="text.secondary">Horários checados</Typography>
+                          <Typography variant="h5" sx={{ fontWeight: 800 }}>{footballDataLogs[0].checked_groups}</Typography>
+                        </Box>
+                      </Grid>
+                      <Grid item xs={6} sm={3}>
+                        <Box sx={{ p: 2, borderRadius: 2, border: '1px solid #1f2937', bgcolor: 'background.default' }}>
+                          <Typography variant="caption" color="text.secondary">Placares aplicados</Typography>
+                          <Typography variant="h5" sx={{ fontWeight: 800 }}>{footballDataLogs[0].updated_matches}</Typography>
+                        </Box>
+                      </Grid>
+                    </Grid>
+
+                    <Stack spacing={1.5}>
+                      {footballDataLogs.map(log => {
+                        const events = log.details?.events || []
+                        return (
+                          <Accordion key={log.id} disableGutters sx={{ bgcolor: 'background.default', border: '1px solid #1f2937' }}>
+                            <AccordionSummary expandIcon={<ExpandIcon />}>
+                              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ width: '100%' }}>
+                                <Chip
+                                  label={getFootballDataStatusLabel(log.status)}
+                                  color={getFootballDataStatusColor(log.status)}
+                                  size="small"
+                                />
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                  #{log.id} - {log.trigger === 'scheduled' ? 'Agendada' : 'Manual'} - {formatDateTime(log.started_at)}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {log.checked_groups} horário(s), {log.updated_matches} placar(es), {log.errors?.length || 0} erro(s)
+                                </Typography>
+                              </Stack>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={1.5}>
+                                {log.errors?.length > 0 && (
+                                  <Alert severity="error">
+                                    {log.errors.join(' | ')}
+                                  </Alert>
+                                )}
+                                {events.length === 0 ? (
+                                  <Typography variant="body2" color="text.secondary">
+                                    Nenhum evento detalhado gravado para esta execução.
+                                  </Typography>
+                                ) : (
+                                  events.map((event, index) => (
+                                    <Box key={`${log.id}-${index}`} sx={{ p: 1.5, borderRadius: 1.5, border: '1px solid #1f2937' }}>
+                                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                                        <Chip
+                                          size="small"
+                                          label={event.level || 'info'}
+                                          color={getFootballDataStatusColor(event.level === 'info' ? 'running' : event.level)}
+                                          variant="outlined"
+                                        />
+                                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                          {event.message}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {event.timestamp ? formatDateTime(event.timestamp) : ''}
+                                        </Typography>
+                                      </Stack>
+                                      {renderFootballDataEventExtra(event)}
+                                    </Box>
+                                  ))
+                                )}
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+                        )
+                      })}
+                    </Stack>
+                  </>
+                )}
+              </Stack>
             </CardContent>
           </Card>
 
@@ -1121,7 +1342,7 @@ export default function AdminPanel() {
       {/* ==========================================
           TAB 2: SCORING MULTIPLIERS (System Admin Only)
          ========================================== */}
-      {tabIndex === 2 && user?.role === 'system_admin' && (
+      {tabIndex === 'scoring' && user?.role === 'system_admin' && (
         <Stack spacing={4}>
           <Grid container spacing={3}>
             {/* Multiplier Form & Settings */}
@@ -1307,7 +1528,7 @@ export default function AdminPanel() {
       {/* ==========================================
           TAB 3: PUBLISH ANNOUNCEMENTS (System Admin Only)
          ========================================== */}
-      {tabIndex === 3 && user?.role === 'system_admin' && (
+      {tabIndex === 'announcements' && user?.role === 'system_admin' && (
         <Card sx={{ maxWidth: 650, mx: 'auto' }}>
           <CardContent sx={{ p: 4 }}>
             <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
@@ -1388,7 +1609,7 @@ export default function AdminPanel() {
       {/* ==========================================
           TAB 4: USERS / RBAC OVERRIDES (System Admin Only)
          ========================================== */}
-      {tabIndex === 4 && user?.role === 'system_admin' && (
+      {tabIndex === 'users' && user?.role === 'system_admin' && (
         <Stack spacing={3}>
           <Card>
             <CardContent sx={{ p: 2 }}>
@@ -1511,7 +1732,7 @@ export default function AdminPanel() {
       {/* ==========================================
           TAB 5: AUDIT LOGS & CSV EXPORTS (System Admin Only)
          ========================================== */}
-      {tabIndex === 5 && user?.role === 'system_admin' && (
+      {tabIndex === 'audit' && user?.role === 'system_admin' && (
         <Stack spacing={4}>
           {/* CSV Exports Control */}
           <Card>
@@ -1533,11 +1754,6 @@ export default function AdminPanel() {
                 <Grid item xs={12} sm={4}>
                   <Button variant="outlined" startIcon={<DownloadIcon />} onClick={() => handleExportCSV('scores')} fullWidth>
                     Exportar Resultados Oficiais
-                  </Button>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Button variant="outlined" startIcon={<DownloadIcon />} onClick={() => handleExportCSV('ranking')} fullWidth>
-                    Exportar Classificação Geral
                   </Button>
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -1590,75 +1806,77 @@ export default function AdminPanel() {
       {/* ==========================================
           TAB 6: PAYMENTS / PIX CONFIGURATION
          ========================================== */}
-      {tabIndex === 6 && (
+      {tabIndex === 'payments' && (user?.role === 'system_admin' || user?.role === 'score_admin') && (
         <Grid container spacing={3}>
           {/* Pix Config Form */}
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
-                  ⚙️ Configuração Geral do Pix
-                </Typography>
-                <Divider sx={{ mb: 3 }} />
-                <Box component="form" onSubmit={handleSavePixConfig}>
-                  <Stack spacing={2.5}>
-                    <TextField
-                      label="Chave Pix do Bolão"
-                      variant="outlined"
-                      fullWidth
-                      required
-                      value={pixKey}
-                      onChange={(e) => setPixKey(e.target.value)}
-                      placeholder="E-mail, Telefone, CPF ou Chave Aleatória"
-                    />
-                    <TextField
-                      label="Nome do Beneficiário"
-                      variant="outlined"
-                      fullWidth
-                      required
-                      value={pixName}
-                      onChange={(e) => setPixName(e.target.value)}
-                      placeholder="Nome impresso no Pix"
-                      helperText="Ex: JOAO SILVA"
-                    />
-                    <TextField
-                      label="Cidade do Beneficiário"
-                      variant="outlined"
-                      fullWidth
-                      required
-                      value={pixCity}
-                      onChange={(e) => setPixCity(e.target.value)}
-                      placeholder="Cidade sem acentos"
-                      helperText="Ex: SAO PAULO"
-                    />
-                    <TextField
-                      label="Valor da Taxa de Inscrição (R$)"
-                      variant="outlined"
-                      type="number"
-                      inputProps={{ step: "0.01", min: "0" }}
-                      fullWidth
-                      required
-                      value={pixEntryFee}
-                      onChange={(e) => setPixEntryFee(e.target.value)}
-                      placeholder="Ex: 50.00"
-                    />
-                    <Button
-                      type="submit"
-                      variant="contained"
-                      color="primary"
-                      startIcon={<SaveIcon />}
-                      sx={{ mt: 1, borderRadius: 2 }}
-                    >
-                      Salvar Configurações
-                    </Button>
-                  </Stack>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+          {user?.role === 'system_admin' && (
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent sx={{ p: 3 }}>
+                  <Typography variant="h6" gutterBottom sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
+                    ⚙️ Configuração Geral do Pix
+                  </Typography>
+                  <Divider sx={{ mb: 3 }} />
+                  <Box component="form" onSubmit={handleSavePixConfig}>
+                    <Stack spacing={2.5}>
+                      <TextField
+                        label="Chave Pix do Bolão"
+                        variant="outlined"
+                        fullWidth
+                        required
+                        value={pixKey}
+                        onChange={(e) => setPixKey(e.target.value)}
+                        placeholder="E-mail, Telefone, CPF ou Chave Aleatória"
+                      />
+                      <TextField
+                        label="Nome do Beneficiário"
+                        variant="outlined"
+                        fullWidth
+                        required
+                        value={pixName}
+                        onChange={(e) => setPixName(e.target.value)}
+                        placeholder="Nome impresso no Pix"
+                        helperText="Ex: JOAO SILVA"
+                      />
+                      <TextField
+                        label="Cidade do Beneficiário"
+                        variant="outlined"
+                        fullWidth
+                        required
+                        value={pixCity}
+                        onChange={(e) => setPixCity(e.target.value)}
+                        placeholder="Cidade sem acentos"
+                        helperText="Ex: SAO PAULO"
+                      />
+                      <TextField
+                        label="Valor da Taxa de Inscrição (R$)"
+                        variant="outlined"
+                        type="number"
+                        inputProps={{ step: "0.01", min: "0" }}
+                        fullWidth
+                        required
+                        value={pixEntryFee}
+                        onChange={(e) => setPixEntryFee(e.target.value)}
+                        placeholder="Ex: 50.00"
+                      />
+                      <Button
+                        type="submit"
+                        variant="contained"
+                        color="primary"
+                        startIcon={<SaveIcon />}
+                        sx={{ mt: 1, borderRadius: 2 }}
+                      >
+                        Salvar Configurações
+                      </Button>
+                    </Stack>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
 
           {/* User Payments Submissions Table */}
-          <Grid item xs={12} md={8}>
+          <Grid item xs={12} md={user?.role === 'system_admin' ? 8 : 12}>
             <TableContainer
               component={Paper}
               sx={{
@@ -1858,7 +2076,7 @@ export default function AdminPanel() {
         </Grid>
       )}
 
-      {tabIndex === 7 && user?.role === 'system_admin' && (
+      {tabIndex === 'invitations' && user?.role === 'system_admin' && (
         <Stack spacing={3}>
           <Card>
             <CardContent sx={{ p: 4 }}>

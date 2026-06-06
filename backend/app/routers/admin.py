@@ -10,16 +10,17 @@ import os
 from fastapi.responses import StreamingResponse
 
 from ..db import get_db
-from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting, Group, GroupInvitation, PasswordResetToken
+from ..models import User, Match, Prediction, StageMultiplier, MultiplierHistory, Announcement, AuditLog, SyncLog, SyncMatchDiff, Team, Stadium, SystemInvitation, SystemSetting, Group, GroupInvitation, PasswordResetToken, FootballDataSyncLog
 from ..schemas import (
     MatchResponse, StageMultiplierResponse, StageMultiplierUpdate, MultiplierHistoryResponse,
     AnnouncementCreate, AnnouncementResponse, UserResponse, AuditLogResponse, SyncLogResponse, SyncMatchDiffResponse,
-    SystemInvitationCreate, SystemInvitationResponse, MatchScoreBatchUpdate, MatchScoreUpdate
+    SystemInvitationCreate, SystemInvitationResponse, MatchScoreBatchUpdate, MatchScoreUpdate,
+    FootballDataSyncLogResponse
 )
 from ..auth import require_system_admin, require_score_admin, require_participant
 from ..scoring import (
     recalculate_match_predictions, recalculate_all_predictions_and_rankings,
-    get_rankings, DEFAULT_MULTIPLIERS, invalidate_ranking_cache,
+    DEFAULT_MULTIPLIERS, invalidate_ranking_cache,
     capture_ranking_snapshot, capture_ranking_update_snapshot,
     should_publish_ranking_update_for_matches
 )
@@ -254,7 +255,16 @@ def check_football_data_scores(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_score_admin)
 ):
-    return sync_finished_scores_from_football_data(db)
+    return sync_finished_scores_from_football_data(db, trigger="manual")
+
+
+@router.get("/football-data/logs", response_model=List[FootballDataSyncLogResponse])
+def get_football_data_sync_logs(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    return db.query(FootballDataSyncLog).order_by(FootballDataSyncLog.started_at.desc()).limit(limit).all()
 
 # ==========================================
 # 2. Openfootball Integration
@@ -839,33 +849,6 @@ def export_scores_csv(
     output.seek(0)
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=placares_export.csv"
-    return response
-
-@router.get("/export/ranking")
-def export_general_ranking_csv(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_system_admin)
-):
-    ranking = get_rankings(db)
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Posicao", "Participante", "ID Usuario", "Pontos Totais", "Placares Exatos", "Resultados Corretos", "Palpites Feitos", "Palpites Faltantes"])
-    
-    for r in ranking:
-        writer.writerow([
-            sanitize_csv_value(r["position"]),
-            sanitize_csv_value(r["display_name"]),
-            sanitize_csv_value(str(r["user_id"])),
-            sanitize_csv_value(r["total_points"]),
-            sanitize_csv_value(r["exact_scores_count"]),
-            sanitize_csv_value(r["correct_results_count"]),
-            sanitize_csv_value(r["predictions_count"]),
-            sanitize_csv_value(r["missing_predictions_count"])
-        ])
-        
-    output.seek(0)
-    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=ranking_geral_export.csv"
     return response
 
 @router.get("/export/audit-logs")

@@ -10,6 +10,8 @@ web_modules/
 .env.test.local
 .env.production.local
 *.env
+REVIEW.md
+CODEREVIEW.md
 
 # Local Databases & storage
 *.db

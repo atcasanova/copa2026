@@ -223,6 +223,22 @@ class SyncMatchDiff(Base):
     sync_log = relationship("SyncLog", back_populates="diffs")
     match = relationship("Match")
 
+
+class FootballDataSyncLog(Base):
+    __tablename__ = "football_data_sync_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trigger = Column(String, default="manual", nullable=False)
+    status = Column(String, default="running", nullable=False)  # running, success, warning, error, skipped
+    checked_groups = Column(Integer, default=0, nullable=False)
+    updated_groups = Column(Integer, default=0, nullable=False)
+    updated_matches = Column(Integer, default=0, nullable=False)
+    errors = Column(JSON, default=list, nullable=False)
+    details = Column(JSON, default=dict, nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

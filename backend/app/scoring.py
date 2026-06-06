@@ -21,10 +21,16 @@ DEFAULT_MULTIPLIERS = {
 LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 RANKING_FINAL_STATUSES = ["finished", "score_confirmed", "score_pending_review"]
 
-def get_stage_multiplier(db: Session, stage: str) -> Decimal:
+def load_stage_multipliers(db: Session) -> dict[str, Decimal]:
+    return {multiplier.stage: multiplier.multiplier for multiplier in db.query(StageMultiplier).all()}
+
+
+def get_stage_multiplier(db: Session, stage: str, stage_multipliers: dict[str, Decimal] | None = None) -> Decimal:
     """
     Fetch the multiplier for a stage. Fallback to default if not present.
     """
+    if stage_multipliers is not None and stage in stage_multipliers:
+        return stage_multipliers[stage]
     db_multiplier = db.query(StageMultiplier).filter(StageMultiplier.stage == stage).first()
     if db_multiplier:
         return db_multiplier.multiplier
@@ -79,7 +85,12 @@ def calculate_base_points(
     else:
         return 0, "Resultado incorreto (0 pontos)"
 
-def score_prediction(db: Session, prediction: Prediction, match: Match) -> None:
+def score_prediction(
+    db: Session,
+    prediction: Prediction,
+    match: Match,
+    stage_multipliers: dict[str, Decimal] | None = None
+) -> None:
     """
     Calculate and save score for a single prediction.
     """
@@ -134,7 +145,7 @@ def score_prediction(db: Session, prediction: Prediction, match: Match) -> None:
     )
 
     # 4. Apply stage multiplier
-    multiplier = get_stage_multiplier(db, match.stage)
+    multiplier = get_stage_multiplier(db, match.stage, stage_multipliers)
     final_pts = int(base_pts * float(multiplier))
 
     # Optional check: If qualifier prediction is configurable to add points in the future, we could add here.
@@ -266,9 +277,10 @@ def recalculate_match_predictions(db: Session, match_id: int) -> None:
     if not match:
         return
         
+    stage_multipliers = load_stage_multipliers(db)
     predictions = db.query(Prediction).filter(Prediction.match_id == match_id).all()
     for pred in predictions:
-        score_prediction(db, pred, match)
+        score_prediction(db, pred, match, stage_multipliers)
     db.commit()
     invalidate_ranking_cache(db)
 
@@ -277,11 +289,12 @@ def recalculate_all_predictions_and_rankings(db: Session) -> None:
     Recalculates all predictions in the entire database.
     Useful after multiplier changes or administrative reset.
     """
+    stage_multipliers = load_stage_multipliers(db)
     matches = db.query(Match).filter(Match.status.in_(["finished", "score_confirmed"])).all()
     for match in matches:
         predictions = db.query(Prediction).filter(Prediction.match_id == match.id).all()
         for pred in predictions:
-            score_prediction(db, pred, match)
+            score_prediction(db, pred, match, stage_multipliers)
     db.commit()
     invalidate_ranking_cache(db)
 

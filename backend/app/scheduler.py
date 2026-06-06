@@ -36,7 +36,7 @@ def scheduled_prediction_reminders_job():
 def scheduled_football_data_scores_job():
     db = SessionLocal()
     try:
-        result = sync_finished_scores_from_football_data(db)
+        result = sync_finished_scores_from_football_data(db, trigger="scheduled")
         if result.get("updated_matches") or result.get("errors"):
             logger.info(f"[Scheduler] Consulta football-data.org concluída: {result}")
     except Exception as e:

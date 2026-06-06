@@ -856,6 +856,9 @@ def test_ranking_cache_flow(client, db_session, test_users):
     score_res = client.post(f"/api/admin/matches/{match.id}/score?score_ft_team1=2&score_ft_team2=1", headers=admin_headers)
     assert score_res.status_code == 200
 
-    # Score updates invalidate and immediately repopulate the general ranking cache
-    # when the ranking snapshot is captured.
+    # Score updates invalidate the general cache after publishing movement snapshots.
+    assert db_session.query(RankingCache).filter(RankingCache.key == "general").count() == 0
+
+    res3 = client.get("/api/rankings/general", headers=headers)
+    assert res3.status_code == 200
     assert db_session.query(RankingCache).filter(RankingCache.key == "general").count() == 1
