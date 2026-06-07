@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Box, Card, CardContent, Typography, Grid, MenuItem, Select, FormControl,
   InputLabel, FormControlLabel, Checkbox, Button, Table, TableBody, TableCell,
@@ -15,6 +15,7 @@ import {
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
+import ExportElementImageButton from '../components/ExportElementImageButton'
 import GroupStandingsTable from '../components/GroupStandingsTable'
 import { getFlagUrl } from '../utils/flags'
 import { getGroupStandings, getActualScore, getPredictionScore } from '../utils/standings'
@@ -83,6 +84,7 @@ const getWeightedLuckyScore = () => {
 
 export default function Predictions() {
   const { user } = useAuth()
+  const groupComparisonRef = useRef(null)
   
   // Data lists
   const [matches, setMatches] = useState([])
@@ -472,37 +474,69 @@ export default function Predictions() {
   const activeGroupName = activeGroupPage?.type === 'group' ? activeGroupPage.value : null
   const expectationGroup = activeGroupName ? getGroupStandings(matches, activeGroupName, getPredictionScore(predictions)) : null
   const realityGroup = activeGroupName ? getGroupStandings(matches, activeGroupName, getActualScore) : null
+  const groupComparisonFileName = activeGroupName
+    ? `expectativa_realidade_grupo_${formatGroupName(activeGroupName)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase() || 'grupo'}.png`
+    : 'expectativa_realidade_grupo.png'
 
   const renderGroupComparison = () => {
     if (!activeGroupName || !expectationGroup || !realityGroup) return null
 
     return (
       <Box sx={{ mt: 3 }}>
-        <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 2 }}>
-          Grupo {formatGroupName(activeGroupName)}: Expectativa x Realidade
-        </Typography>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent sx={{ p: 2 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-                  Expectativa
-                </Typography>
-                <GroupStandingsTable standings={expectationGroup.standings} dense />
-              </CardContent>
-            </Card>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: { xs: 'stretch', sm: 'center' },
+            flexDirection: { xs: 'column', sm: 'row' },
+            gap: 1.5,
+            mb: 2
+          }}
+        >
+          <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+            Grupo {formatGroupName(activeGroupName)}: Expectativa x Realidade
+          </Typography>
+          <ExportElementImageButton
+            targetRef={groupComparisonRef}
+            fileName={groupComparisonFileName}
+            shareTitle={`Grupo ${formatGroupName(activeGroupName)} - Expectativa x Realidade`}
+            label="Compartilhar Comparativo"
+            size="small"
+          />
+        </Box>
+
+        <Box ref={groupComparisonRef} sx={{ bgcolor: 'background.default', p: { xs: 1.5, sm: 2 }, borderRadius: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 2 }}>
+            Grupo {formatGroupName(activeGroupName)}: Expectativa x Realidade
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent sx={{ p: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
+                    Expectativa
+                  </Typography>
+                  <GroupStandingsTable standings={expectationGroup.standings} dense />
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent sx={{ p: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
+                    Realidade
+                  </Typography>
+                  <GroupStandingsTable standings={realityGroup.standings} dense />
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={6}>
-            <Card>
-              <CardContent sx={{ p: 2 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-                  Realidade
-                </Typography>
-                <GroupStandingsTable standings={realityGroup.standings} dense />
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+        </Box>
       </Box>
     )
   }
@@ -847,7 +881,6 @@ export default function Predictions() {
             </TableBody>
           </Table>
         </TableContainer>
-        {renderGroupComparison()}
       </Box>
 
       {/* Mobile Stacked Card View */}
@@ -1034,8 +1067,9 @@ export default function Predictions() {
             })}
           </Stack>
         )}
-        {renderGroupComparison()}
       </Box>
+
+      {renderGroupComparison()}
 
       <Dialog open={predictionListOpen} onClose={handleClosePredictionList} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 800 }}>

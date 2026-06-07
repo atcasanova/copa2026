@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Box, Card, CardContent, Typography, Tabs, Tab, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, MenuItem, Select, FormControl, InputLabel,
@@ -13,9 +13,11 @@ import {
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
+import ExportElementImageButton from '../components/ExportElementImageButton'
 
 export default function Rankings() {
   const { user } = useAuth()
+  const generalTop10Ref = useRef(null)
   
   // Tabs: 0 = General, 1 = By Stage, 2 = By Date
   const [tabIndex, setTabIndex] = useState(0)
@@ -146,6 +148,115 @@ export default function Rankings() {
     }
   }
 
+  const renderPosition = (row, movement) => (
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
+      {row.position === 1 ? (
+        <Typography sx={{ color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
+          🥇 1º
+        </Typography>
+      ) : row.position === 2 ? (
+        <Typography sx={{ color: 'text.primary', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
+          🥈 2º
+        </Typography>
+      ) : row.position === 3 ? (
+        <Typography sx={{ color: '#cd7f32', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
+          🥉 3º
+        </Typography>
+      ) : (
+        <Typography sx={{ fontWeight: 900 }}>{row.position}º</Typography>
+      )}
+      {movement && (
+        <Tooltip title={movement.label}>
+          <Box sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 0.15,
+            color: movement.color,
+            fontSize: '0.78rem',
+            fontWeight: 900,
+            lineHeight: 1
+          }}>
+            {movement.icon}
+            {movement.amount}
+          </Box>
+        </Tooltip>
+      )}
+    </Box>
+  )
+
+  const renderRankingRows = (rows, { showTieBreakerHelp = true } = {}) => (
+    rows.map((row) => {
+      const isMe = row.user_id === user?.id
+      const medal = getMedal(row.user_id, row.exact_scores_count)
+      const movement = getMovementIndicator(row.position_change)
+      return (
+        <TableRow
+          key={row.user_id}
+          sx={{
+            bgcolor: isMe ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+            borderLeft: isMe ? '4px solid #10b981' : 'none',
+            '&:hover': { bgcolor: isMe ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.01)' }
+          }}
+        >
+          <TableCell align="center" sx={{ fontWeight: 800 }}>
+            {renderPosition(row, movement)}
+          </TableCell>
+
+          <TableCell>
+            <Box display="flex" alignItems="center" gap={2}>
+              <Avatar
+                src={row.avatar_url || ''}
+                alt={row.display_name}
+                sx={{ width: 32, height: 32, bgcolor: isMe ? 'primary.main' : '#374151', fontSize: '0.85rem', fontWeight: 'bold' }}
+              >
+                {row.display_name.charAt(0).toUpperCase()}
+              </Avatar>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {medal && (
+                  <Tooltip title={`${row.exact_scores_count} acertos de placares exatos`}>
+                    <Box
+                      component="img"
+                      src={medal.src}
+                      alt={medal.label}
+                      sx={{
+                        height: 20,
+                        width: 20,
+                        objectFit: 'contain',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s',
+                        '&:hover': { transform: 'scale(1.25)' }
+                      }}
+                    />
+                  </Tooltip>
+                )}
+                <Typography sx={{ fontWeight: isMe ? 700 : 500 }}>
+                  {row.display_name} {isMe && '(Você)'}
+                </Typography>
+                {showTieBreakerHelp && (
+                  <Tooltip title={`Desempates: ${row.exact_scores_count} placar(es) exato(s), ${row.correct_results_count} resultado(s) correto(s), ${row.knockout_points || 0} ponto(s) no mata-mata, ${row.missing_predictions_count} palpite(s) faltante(s) em jogos bloqueados. Palpites registrados: ${row.predictions_count}.`}>
+                    <HelpOutline sx={{ fontSize: '0.95rem', cursor: 'help', color: 'text.secondary' }} />
+                  </Tooltip>
+                )}
+              </Box>
+            </Box>
+          </TableCell>
+
+          <TableCell align="center" sx={{ fontWeight: 800, color: 'primary.light', fontSize: '1.05rem' }}>
+            {row.total_points}
+          </TableCell>
+
+          <TableCell align="center" sx={{ fontWeight: 600 }}>
+            {row.exact_scores_count}
+          </TableCell>
+
+          <TableCell align="center">
+            {row.correct_results_count}
+          </TableCell>
+        </TableRow>
+      )
+    })
+  )
+
   const chartParticipants = rankingHistory.participants.filter(participant => selectedChartUsers[participant.user_id])
   const maxChartPosition = Math.max(
     1,
@@ -200,6 +311,18 @@ export default function Rankings() {
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
+
+      {tabIndex === 0 && rankingData.length > 0 && !loading && (
+        <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' }, mb: 2 }}>
+          <ExportElementImageButton
+            targetRef={generalTop10Ref}
+            fileName="ranking_geral_top_10.png"
+            shareTitle="Ranking Geral - Top 10"
+            label="Compartilhar Top 10"
+            fullWidth={false}
+          />
+        </Box>
+      )}
 
       {/* Tabs Selector */}
       <Tabs 
@@ -463,115 +586,46 @@ export default function Rankings() {
                 </TableCell>
               </TableRow>
             ) : (
-              rankingData.map((row, index) => {
-                const isMe = row.user_id === user?.id
-                const medal = getMedal(row.user_id, row.exact_scores_count)
-                const movement = getMovementIndicator(row.position_change)
-                return (
-                  <TableRow 
-                    key={row.user_id}
-                    sx={{
-                      bgcolor: isMe ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
-                      borderLeft: isMe ? '4px solid #10b981' : 'none',
-                      '&:hover': { bgcolor: isMe ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.01)' }
-                    }}
-                  >
-                    {/* Position */}
-                    <TableCell align="center" sx={{ fontWeight: 800 }}>
-                      <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
-                        {row.position === 1 ? (
-                          <Typography sx={{ color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
-                            🥇 1º
-                          </Typography>
-                        ) : row.position === 2 ? (
-                          <Typography sx={{ color: 'text.primary', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
-                            🥈 2º
-                          </Typography>
-                        ) : row.position === 3 ? (
-                          <Typography sx={{ color: '#cd7f32', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, fontWeight: 900 }}>
-                            🥉 3º
-                          </Typography>
-                        ) : (
-                          <Typography sx={{ fontWeight: 900 }}>{row.position}º</Typography>
-                        )}
-                        {movement && (
-                          <Tooltip title={movement.label}>
-                            <Box sx={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 0.15,
-                              color: movement.color,
-                              fontSize: '0.78rem',
-                              fontWeight: 900,
-                              lineHeight: 1
-                            }}>
-                              {movement.icon}
-                              {movement.amount}
-                            </Box>
-                          </Tooltip>
-                        )}
-                      </Box>
-                    </TableCell>
-
-                    {/* Avatar & Display Name */}
-                    <TableCell>
-                      <Box display="flex" alignItems="center" gap={2}>
-                        <Avatar 
-                          src={row.avatar_url || ''} 
-                          alt={row.display_name}
-                          sx={{ width: 32, height: 32, bgcolor: isMe ? 'primary.main' : '#374151', fontSize: '0.85rem', fontWeight: 'bold' }}
-                        >
-                          {row.display_name.charAt(0).toUpperCase()}
-                        </Avatar>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {medal && (
-                            <Tooltip title={`${row.exact_scores_count} acertos de placares exatos`}>
-                              <Box 
-                                component="img"
-                                src={medal.src} 
-                                alt={medal.label}
-                                sx={{ 
-                                  height: 20, 
-                                  width: 20, 
-                                  objectFit: 'contain',
-                                  cursor: 'pointer',
-                                  transition: 'transform 0.2s',
-                                  '&:hover': { transform: 'scale(1.25)' }
-                                }} 
-                              />
-                            </Tooltip>
-                          )}
-                          <Typography sx={{ fontWeight: isMe ? 700 : 500 }}>
-                            {row.display_name} {isMe && '(Você)'}
-                          </Typography>
-                          <Tooltip title={`Desempates: ${row.exact_scores_count} placar(es) exato(s), ${row.correct_results_count} resultado(s) correto(s), ${row.knockout_points || 0} ponto(s) no mata-mata, ${row.missing_predictions_count} palpite(s) faltante(s) em jogos bloqueados. Palpites registrados: ${row.predictions_count}.`}>
-                            <HelpOutline sx={{ fontSize: '0.95rem', cursor: 'help', color: 'text.secondary' }} />
-                          </Tooltip>
-                        </Box>
-                      </Box>
-                    </TableCell>
-
-                    {/* Total Points */}
-                    <TableCell align="center" sx={{ fontWeight: 800, color: 'primary.light', fontSize: '1.05rem' }}>
-                      {row.total_points}
-                    </TableCell>
-
-                    {/* Exact count */}
-                    <TableCell align="center" sx={{ fontWeight: 600 }}>
-                      {row.exact_scores_count}
-                    </TableCell>
-
-                    {/* Correct result count */}
-                    <TableCell align="center">
-                      {row.correct_results_count}
-                    </TableCell>
-                  </TableRow>
-                )
-              })
+              renderRankingRows(rankingData)
             )}
           </TableBody>
         </Table>
       </TableContainer>
+
+      <Box
+        sx={{
+          position: 'absolute',
+          left: -10000,
+          top: 0,
+          width: 760,
+          bgcolor: 'background.paper'
+        }}
+        aria-hidden="true"
+      >
+        <Card ref={generalTop10Ref}>
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 2 }}>
+              🏆 Ranking Geral - Top 10
+            </Typography>
+            <TableContainer component={Paper} sx={{ boxShadow: 'none', borderRadius: 2 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
+                    <TableCell>Participante</TableCell>
+                    <TableCell align="center">Pts Totais</TableCell>
+                    <TableCell align="center">Placar Exato</TableCell>
+                    <TableCell align="center">Resultado Certo</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {renderRankingRows(rankingData.slice(0, 10), { showTieBreakerHelp: false })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      </Box>
 
       {/* Tie breaker documentation banner */}
       <Card sx={{ mt: 4, bgcolor: '#111827' }}>
