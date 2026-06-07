@@ -492,3 +492,165 @@ def sync_finished_scores_from_football_data(
     )
     _update_sync_log(db, sync_log.id, result, details, status=final_status, finished=True)
     return result
+
+
+def map_api_stage_to_local(api_stage: str) -> str:
+    s = api_stage.upper()
+    if s in ("GROUP_STAGE", "GROUP"):
+        return "Group Stage"
+    elif s in ("LAST_32", "ROUND_OF_32", "R32"):
+        return "Round of 32"
+    elif s in ("LAST_16", "ROUND_OF_16", "R16"):
+        return "Round of 16"
+    elif "QUARTER" in s:
+        return "Quarter-finals"
+    elif "SEMI" in s:
+        return "Semi-finals"
+    elif "FINAL" in s or "THIRD" in s:
+        return "Final"
+    return "Group Stage"
+
+
+def sync_fixtures_from_football_data(db: Session, trigger: str = "manual") -> dict:
+    """
+    Fetches all matches from football-data.org and updates local knockout matches
+    with real team names when they are defined by the API.
+    """
+    result = {"enabled": True, "updated_matches": 0, "errors": []}
+    
+    if not football_data_enabled():
+        return {"enabled": False, "updated_matches": 0, "errors": []}
+    
+    token = get_api_token()
+    if not token:
+        result["errors"].append("FOOTBALL_DATA_API não configurado.")
+        return result
+
+    base_url = os.getenv("FOOTBALL_DATA_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    competition = os.getenv("FOOTBALL_DATA_COMPETITION", "WC").strip()
+    endpoint = f"{base_url}/competitions/{competition}/matches"
+    
+    try:
+        response = requests.get(
+            endpoint,
+            headers={"X-Auth-Token": token},
+            timeout=int(os.getenv("FOOTBALL_DATA_TIMEOUT_SECONDS", "10")),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        api_matches = payload.get("matches", [])
+    except Exception as exc:
+        result["errors"].append(f"Erro ao consultar API: {str(exc)}")
+        return result
+
+    # Load all teams into a dictionary for quick lookup (by normalized name)
+    from .models import Team
+    from .sync import translate_team_name
+    
+    teams = db.query(Team).all()
+    team_map = {}
+    for t in teams:
+        team_map[_normalize(t.name)] = t
+        if t.fifa_code:
+            team_map[_normalize(t.fifa_code)] = t
+
+    def find_local_team(api_team: dict | None) -> Team | None:
+        if not api_team:
+            return None
+        name = api_team.get("name")
+        short_name = api_team.get("shortName")
+        tla = api_team.get("tla")
+        
+        is_placeholder = any(
+            kw in (name or "").lower() or kw in (short_name or "").lower() or kw in (tla or "").lower()
+            for kw in ["vencedor", "segundo", "grupo", "jogo", "r32", "oitavas", "quartas", "semifinal", "winner", "runner", "match", "placeholder", "tbd", "to be"]
+        ) or (not name and not short_name)
+        
+        if is_placeholder:
+            return None
+            
+        for val in [name, short_name, tla]:
+            if val:
+                norm = _normalize(val)
+                if norm in team_map:
+                    return team_map[norm]
+        
+        if name:
+            translated = translate_team_name(name)
+            existing = db.query(Team).filter(Team.name == translated).first()
+            if existing:
+                team_map[_normalize(translated)] = existing
+                return existing
+                
+            new_team = Team(
+                name=translated,
+                fifa_code=tla or translated[:3].upper(),
+                group_name="Imported",
+                continent="Desconhecido",
+                flag_icon="🏳️"
+            )
+            db.add(new_team)
+            db.commit()
+            db.refresh(new_team)
+            team_map[_normalize(translated)] = new_team
+            if tla:
+                team_map[_normalize(tla)] = new_team
+            return new_team
+        return None
+
+    for api_match in api_matches:
+        api_stage = api_match.get("stage")
+        if not api_stage or api_stage == "GROUP_STAGE":
+            continue
+            
+        mapped_stage = map_api_stage_to_local(api_stage)
+        api_kickoff = _parse_utc_datetime(api_match.get("utcDate"))
+        if not api_kickoff:
+            continue
+            
+        local_match = db.query(Match).filter(
+            Match.stage == mapped_stage,
+            Match.kickoff_time >= api_kickoff - timedelta(minutes=60),
+            Match.kickoff_time <= api_kickoff + timedelta(minutes=60)
+        ).first()
+        
+        if not local_match:
+            continue
+            
+        api_home = api_match.get("homeTeam")
+        api_away = api_match.get("awayTeam")
+        
+        local_home_team = find_local_team(api_home)
+        local_away_team = find_local_team(api_away)
+        
+        if local_home_team and local_away_team:
+            if (local_match.team1_name != local_home_team.name) or (local_match.team2_name != local_away_team.name):
+                old_val = {
+                    "team1_name": local_match.team1_name,
+                    "team2_name": local_match.team2_name,
+                }
+                
+                local_match.team1_name = local_home_team.name
+                local_match.team2_name = local_away_team.name
+                
+                db.flush()
+                
+                db.add(AuditLog(
+                    user_id=None,
+                    action="match_fixture_auto_update",
+                    target_type="match",
+                    target_id=str(local_match.id),
+                    old_value=old_val,
+                    new_value={
+                        "team1_name": local_match.team1_name,
+                        "team2_name": local_match.team2_name,
+                    },
+                    reason=f"Confronto definido automaticamente via API do football-data.org (Trigger: {trigger})"
+                ))
+                result["updated_matches"] += 1
+                
+    if result["updated_matches"] > 0:
+        db.commit()
+        invalidate_ranking_cache(db)
+        
+    return result

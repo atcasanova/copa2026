@@ -47,8 +47,21 @@ def get_my_predictions(
     query = db.query(Prediction).filter(Prediction.user_id == current_user.id)
     if current_user.role not in ["system_admin", "score_admin"]:
         from .utils import get_unlocked_stages
+        from ..models import Team
+        from sqlalchemy import or_
+        from sqlalchemy.orm import aliased
+        
         unlocked = get_unlocked_stages(db)
-        query = query.join(Match).filter(Match.stage.in_(unlocked))
+        t1 = aliased(Team)
+        t2 = aliased(Team)
+        
+        query = query.join(Match).join(t1, Match.team1_name == t1.name).join(t2, Match.team2_name == t2.name)
+        query = query.filter(
+            or_(
+                Match.stage.in_(unlocked),
+                (t1.group_name != "Knockout Placeholder") & (t2.group_name != "Knockout Placeholder")
+            )
+        )
     return query.all()
 
 @router.post("/save", response_model=PredictionResponse)
@@ -82,7 +95,8 @@ def save_prediction(
     if current_user.role not in ["system_admin", "score_admin"]:
         from .utils import get_unlocked_stages
         unlocked = get_unlocked_stages(db)
-        if match.stage not in unlocked:
+        is_defined = match.team1.group_name != "Knockout Placeholder" and match.team2.group_name != "Knockout Placeholder"
+        if match.stage not in unlocked and not is_defined:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Fase do torneio ainda bloqueada para palpites."
@@ -175,7 +189,8 @@ def bulk_save_predictions(
 
         # Enforce stage unlocking validation
         if current_user.role not in ["system_admin", "score_admin"]:
-            if match.stage not in unlocked_stages:
+            is_defined = match.team1.group_name != "Knockout Placeholder" and match.team2.group_name != "Knockout Placeholder"
+            if match.stage not in unlocked_stages and not is_defined:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Não foi possível salvar: A fase {match.stage} ainda está bloqueada para palpites."
@@ -245,7 +260,25 @@ def get_missing_predictions(
     open_threshold = get_locked_match_cutoff(db)
     
     # Matches that are not locked
-    open_matches = db.query(Match).filter(Match.kickoff_time > open_threshold).all()
+    if current_user.role not in ["system_admin", "score_admin"]:
+        from .utils import get_unlocked_stages
+        from ..models import Team
+        from sqlalchemy import or_
+        from sqlalchemy.orm import aliased
+        
+        unlocked = get_unlocked_stages(db)
+        t1 = aliased(Team)
+        t2 = aliased(Team)
+        
+        open_matches = db.query(Match).join(t1, Match.team1_name == t1.name).join(t2, Match.team2_name == t2.name).filter(
+            Match.kickoff_time > open_threshold,
+            or_(
+                Match.stage.in_(unlocked),
+                (t1.group_name != "Knockout Placeholder") & (t2.group_name != "Knockout Placeholder")
+            )
+        ).all()
+    else:
+        open_matches = db.query(Match).filter(Match.kickoff_time > open_threshold).all()
     
     # Subquery of matches user has predicted
     pred_match_ids = [p.match_id for p in db.query(Prediction.match_id).filter(Prediction.user_id == current_user.id).all()]
@@ -266,10 +299,29 @@ def get_matches_locking_soon(
     lock_time_end = lock_time_start + timedelta(hours=hours)
     
     # Matches locking soon
-    soon_matches = db.query(Match).filter(
-        Match.kickoff_time > lock_time_start,
-        Match.kickoff_time <= lock_time_end
-    ).all()
+    if current_user.role not in ["system_admin", "score_admin"]:
+        from .utils import get_unlocked_stages
+        from ..models import Team
+        from sqlalchemy import or_
+        from sqlalchemy.orm import aliased
+        
+        unlocked = get_unlocked_stages(db)
+        t1 = aliased(Team)
+        t2 = aliased(Team)
+        
+        soon_matches = db.query(Match).join(t1, Match.team1_name == t1.name).join(t2, Match.team2_name == t2.name).filter(
+            Match.kickoff_time > lock_time_start,
+            Match.kickoff_time <= lock_time_end,
+            or_(
+                Match.stage.in_(unlocked),
+                (t1.group_name != "Knockout Placeholder") & (t2.group_name != "Knockout Placeholder")
+            )
+        ).all()
+    else:
+        soon_matches = db.query(Match).filter(
+            Match.kickoff_time > lock_time_start,
+            Match.kickoff_time <= lock_time_end
+        ).all()
     
     # Subquery of matches user has predicted
     pred_match_ids = [p.match_id for p in db.query(Prediction.match_id).filter(Prediction.user_id == current_user.id).all()]

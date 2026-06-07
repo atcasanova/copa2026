@@ -15,7 +15,7 @@ from ..schemas import (
     MatchResponse, StageMultiplierResponse, StageMultiplierUpdate, MultiplierHistoryResponse,
     AnnouncementCreate, AnnouncementResponse, UserResponse, AuditLogResponse, SyncLogResponse, SyncMatchDiffResponse,
     SystemInvitationCreate, SystemInvitationResponse, MatchScoreBatchUpdate, MatchScoreUpdate,
-    FootballDataSyncLogResponse
+    FootballDataSyncLogResponse, MatchDefineTeams
 )
 from ..auth import require_system_admin, require_score_admin, require_participant
 from ..scoring import (
@@ -256,6 +256,325 @@ def check_football_data_scores(
     current_user: User = Depends(require_score_admin)
 ):
     return sync_finished_scores_from_football_data(db, trigger="manual")
+
+
+@router.post("/football-data/sync-fixtures")
+def trigger_football_data_fixtures_sync(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    from ..football_data import sync_fixtures_from_football_data
+    results = sync_fixtures_from_football_data(db, trigger="manual")
+    
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="football_data_fixtures_sync_trigger",
+        target_type="sync",
+        new_value=results
+    )
+    db.add(audit)
+    db.commit()
+    
+    return results
+
+
+ORIGINAL_PLACEHOLDERS = {
+    73: ("2A", "2B"),
+    74: ("1E", "3A/B/C/D/F"),
+    75: ("1F", "2C"),
+    76: ("1C", "2F"),
+    77: ("1I", "3C/D/F/G/H"),
+    78: ("2E", "2I"),
+    79: ("1A", "3C/E/F/H/I"),
+    80: ("1L", "3E/H/I/J/K"),
+    81: ("1D", "3B/E/F/I/J"),
+    82: ("1G", "3A/E/H/I/J"),
+    83: ("2K", "2L"),
+    84: ("1H", "2J"),
+    85: ("1B", "3E/F/G/I/J"),
+    86: ("1J", "2H"),
+    87: ("1K", "3D/E/I/J/L"),
+    88: ("2D", "2G"),
+    89: ("W74", "W77"),
+    90: ("W73", "W75"),
+    91: ("W76", "W78"),
+    92: ("W79", "W80"),
+    93: ("W83", "W84"),
+    94: ("W81", "W82"),
+    95: ("W86", "W88"),
+    96: ("W85", "W87"),
+    97: ("W89", "W90"),
+    98: ("W93", "W94"),
+    99: ("W91", "W92"),
+    100: ("W95", "W96"),
+    101: ("W97", "W98"),
+    102: ("W99", "W100"),
+    103: ("L101", "L102"),
+    104: ("W101", "W102"),
+}
+
+def get_possible_teams(db: Session, placeholder: str) -> list[dict]:
+    import re
+    from ..models import Team
+    placeholder = placeholder.strip()
+    
+    # Check if this name is a real team
+    t_exist = db.query(Team).filter(Team.name == placeholder).first()
+    if t_exist and t_exist.group_name != "Knockout Placeholder":
+        return [{"name": t_exist.name, "flag_icon": t_exist.flag_icon}]
+        
+    # If it is a group letter position, e.g. "1A", "2B", "1E"
+    if len(placeholder) == 2 and placeholder[0] in ("1", "2") and "A" <= placeholder[1] <= "L":
+        pos = int(placeholder[0]) - 1
+        g_letter = placeholder[1]
+        group_teams = db.query(Team).filter(Team.group_name.in_([g_letter, f"Grupo {g_letter}"])).all()
+        return [{"name": t.name, "flag_icon": t.flag_icon} for t in group_teams]
+
+    # If it is a third-placed placeholder, e.g. "3A/B/C/D/F"
+    if placeholder.startswith("3"):
+        group_letters = [c for c in placeholder[1:] if "A" <= c <= "L"]
+        possible_dict = {}
+        for letter in group_letters:
+            group_teams = db.query(Team).filter(Team.group_name.in_([letter, f"Grupo {letter}"])).all()
+            for t in group_teams:
+                possible_dict[t.name] = t.flag_icon
+        return [{"name": name, "flag_icon": icon} for name, icon in sorted(possible_dict.items())]
+
+    # If it is a winner/loser placeholder, e.g. "W74", "L101"
+    if len(placeholder) > 1 and placeholder[0] in ("W", "L") and placeholder[1:].isdigit():
+        ref_id = int(placeholder[1:])
+        if ref_id in ORIGINAL_PLACEHOLDERS:
+            orig_t1, orig_t2 = ORIGINAL_PLACEHOLDERS[ref_id]
+            p1 = get_possible_teams(db, orig_t1)
+            p2 = get_possible_teams(db, orig_t2)
+            combined = {}
+            for item in p1 + p2:
+                combined[item["name"]] = item["flag_icon"]
+            return [{"name": name, "flag_icon": icon} for name, icon in sorted(combined.items())]
+
+    return []
+
+
+@router.get("/matches/knockout-setup")
+def get_knockout_setup(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    from ..models import Team, Match
+    from .utils import normalized_text_sort_key
+    
+    # Calculate group standings
+    groups = {}
+    teams = db.query(Team).filter(Team.group_name != "Knockout Placeholder").all()
+    standings = {}
+    for t in teams:
+        standings[t.name] = {
+            "team_name": t.name,
+            "group_name": t.group_name,
+            "points": 0,
+            "goals_for": 0,
+            "goals_against": 0,
+            "goal_difference": 0,
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+        }
+
+    matches = db.query(Match).filter(
+        Match.stage == "Group Stage",
+        Match.status.in_(["finished", "score_confirmed"])
+    ).all()
+
+    for m in matches:
+        t1, t2 = m.team1_name, m.team2_name
+        s1, s2 = m.score_ft_team1, m.score_ft_team2
+        if s1 is None or s2 is None:
+            continue
+        if t1 in standings and t2 in standings:
+            standings[t1]["played"] += 1
+            standings[t2]["played"] += 1
+            standings[t1]["goals_for"] += s1
+            standings[t1]["goals_against"] += s2
+            standings[t2]["goals_for"] += s2
+            standings[t2]["goals_against"] += s1
+            standings[t1]["goal_difference"] = standings[t1]["goals_for"] - standings[t1]["goals_against"]
+            standings[t2]["goal_difference"] = standings[t2]["goals_for"] - standings[t2]["goals_against"]
+            if s1 > s2:
+                standings[t1]["points"] += 3
+                standings[t1]["wins"] += 1
+                standings[t2]["losses"] += 1
+            elif s1 < s2:
+                standings[t2]["points"] += 3
+                standings[t2]["wins"] += 1
+                standings[t1]["losses"] += 1
+            else:
+                standings[t1]["points"] += 1
+                standings[t2]["points"] += 1
+                standings[t1]["draws"] += 1
+                standings[t2]["draws"] += 1
+
+    for team_name, stats in standings.items():
+        g_name = stats["group_name"]
+        groups.setdefault(g_name, []).append(stats)
+
+    for g_name, team_list in groups.items():
+        team_list.sort(key=lambda x: (x["points"], x["goal_difference"], x["goals_for"]), reverse=True)
+
+    third_placed = []
+    for g_name, team_list in groups.items():
+        if len(team_list) >= 3:
+            third_placed.append(team_list[2])
+    third_placed.sort(key=lambda x: (x["points"], x["goal_difference"], x["goals_for"]), reverse=True)
+
+    def find_suggestion(placeholder: str) -> str | None:
+        placeholder = placeholder.strip()
+        t_exist = db.query(Team).filter(Team.name == placeholder).first()
+        if t_exist and t_exist.group_name != "Knockout Placeholder":
+            return placeholder
+
+        if len(placeholder) == 2 and placeholder[0] in ("1", "2") and "A" <= placeholder[1] <= "L":
+            pos = int(placeholder[0]) - 1
+            g_letter = placeholder[1]
+            g_name = f"Grupo {g_letter}"
+            if g_name in groups and len(groups[g_name]) > pos:
+                return groups[g_name][pos]["team_name"]
+
+        if placeholder.startswith("3"):
+            allowed_groups = [f"Grupo {c}" for c in placeholder[1:].split('/')]
+            for t in third_placed[:8]:
+                if t["group_name"] in allowed_groups:
+                    return t["team_name"]
+
+        if placeholder.startswith("W") and placeholder[1:].isdigit():
+            m_id = int(placeholder[1:])
+            m_ref = db.query(Match).filter(Match.id == m_id).first()
+            if m_ref and m_ref.status in ("finished", "score_confirmed"):
+                p1 = m_ref.score_pen_team1 or 0
+                p2 = m_ref.score_pen_team2 or 0
+                et1 = m_ref.score_et_team1 or m_ref.score_ft_team1
+                et2 = m_ref.score_et_team2 or m_ref.score_ft_team2
+                if p1 > p2:
+                    return m_ref.team1_name
+                elif p2 > p1:
+                    return m_ref.team2_name
+                elif et1 > et2:
+                    return m_ref.team1_name
+                elif et2 > et1:
+                    return m_ref.team2_name
+
+        if placeholder.startswith("L") and placeholder[1:].isdigit():
+            m_id = int(placeholder[1:])
+            m_ref = db.query(Match).filter(Match.id == m_id).first()
+            if m_ref and m_ref.status in ("finished", "score_confirmed"):
+                p1 = m_ref.score_pen_team1 or 0
+                p2 = m_ref.score_pen_team2 or 0
+                et1 = m_ref.score_et_team1 or m_ref.score_ft_team1
+                et2 = m_ref.score_et_team2 or m_ref.score_ft_team2
+                if p1 > p2:
+                    return m_ref.team2_name
+                elif p2 > p1:
+                    return m_ref.team1_name
+                elif et1 > et2:
+                    return m_ref.team2_name
+                elif et2 > et1:
+                    return m_ref.team1_name
+        return None
+
+    knockout_matches = db.query(Match).filter(Match.stage != "Group Stage").order_by(Match.kickoff_time.asc()).all()
+    placeholder_team_names = {t.name for t in db.query(Team).filter(Team.group_name == "Knockout Placeholder").all()}
+    
+    matches_data = []
+    for m in knockout_matches:
+        orig_t1, orig_t2 = ORIGINAL_PLACEHOLDERS.get(m.id, (m.team1_name, m.team2_name))
+        possible_t1 = get_possible_teams(db, orig_t1)
+        possible_t2 = get_possible_teams(db, orig_t2)
+        
+        # If possible teams list is empty (unseeded DB), fallback to all teams
+        if not possible_t1 or not possible_t2:
+            all_teams_list = [{"name": t.name, "flag_icon": t.flag_icon} for t in db.query(Team).filter(Team.group_name != "Knockout Placeholder").all()]
+            if not possible_t1:
+                possible_t1 = all_teams_list
+            if not possible_t2:
+                possible_t2 = all_teams_list
+
+        matches_data.append({
+            "id": m.id,
+            "round": m.round,
+            "stage": m.stage,
+            "date": m.date,
+            "time_str": m.time_str,
+            "kickoff_time": m.kickoff_time.isoformat(),
+            "team1_name": m.team1_name,
+            "team2_name": m.team2_name,
+            "team1_is_placeholder": m.team1_name in placeholder_team_names,
+            "team2_is_placeholder": m.team2_name in placeholder_team_names,
+            "suggested_team1": find_suggestion(m.team1_name),
+            "suggested_team2": find_suggestion(m.team2_name),
+            "possible_teams1": possible_t1,
+            "possible_teams2": possible_t2,
+        })
+
+    all_teams = [{"name": t.name, "flag_icon": t.flag_icon} for t in teams]
+    return {
+        "matches": matches_data,
+        "groups": groups,
+        "third_placed": third_placed,
+        "all_teams": all_teams
+    }
+
+
+@router.post("/matches/{match_id}/define-teams")
+def define_matchout_teams(
+    match_id: int,
+    payload: MatchDefineTeams,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_score_admin)
+):
+    from ..models import Match, Team, AuditLog
+    
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Partida não encontrada.")
+        
+    if match.stage == "Group Stage":
+        raise HTTPException(status_code=400, detail="Não é permitido alterar times de partidas da fase de grupos.")
+
+    t1 = db.query(Team).filter(Team.name == payload.team1_name).first()
+    t2 = db.query(Team).filter(Team.name == payload.team2_name).first()
+    
+    if not t1 or t1.group_name == "Knockout Placeholder":
+        raise HTTPException(status_code=400, detail=f"Time 1 '{payload.team1_name}' inválido ou é placeholder.")
+    if not t2 or t2.group_name == "Knockout Placeholder":
+        raise HTTPException(status_code=400, detail=f"Time 2 '{payload.team2_name}' inválido ou é placeholder.")
+
+    old_val = {
+        "team1_name": match.team1_name,
+        "team2_name": match.team2_name,
+    }
+    
+    match.team1_name = t1.name
+    match.team2_name = t2.name
+    db.flush()
+    
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="match_fixture_manual_update",
+        target_type="match",
+        target_id=str(match.id),
+        old_value=old_val,
+        new_value={
+            "team1_name": match.team1_name,
+            "team2_name": match.team2_name,
+        },
+        reason="Confronto definido manualmente pelo administrador"
+    )
+    db.add(audit)
+    db.commit()
+    
+    invalidate_ranking_cache(db)
+    
+    return {"message": "Times definidos com sucesso.", "team1_name": match.team1_name, "team2_name": match.team2_name}
 
 
 @router.get("/football-data/logs", response_model=List[FootballDataSyncLogResponse])

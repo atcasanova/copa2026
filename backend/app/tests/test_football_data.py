@@ -149,3 +149,149 @@ def test_football_data_waits_when_one_same_kickoff_match_is_not_finished(db_sess
     assert log.status == "warning"
     assert log.updated_matches == 0
     assert any("Nenhum placar foi aplicado" in event["message"] for event in log.details["events"])
+
+
+def test_sync_fixtures_from_football_data(db_session, monkeypatch):
+    from app.football_data import sync_fixtures_from_football_data
+    monkeypatch.setenv("FOOTBALL_DATA_API", "fake-token")
+    monkeypatch.setenv("FOOTBALL_DATA_ENABLED", "true")
+
+    # Add teams
+    _add_team(db_session, "Brasil", "BRA")
+    _add_team(db_session, "Argentina", "ARG")
+    
+    p1 = Team(name="2A", group_name="Knockout Placeholder", fifa_code=None)
+    p2 = Team(name="2B", group_name="Knockout Placeholder", fifa_code=None)
+    db_session.add_all([p1, p2])
+    db_session.commit()
+
+    # Add knockout match
+    stadium = db_session.query(Stadium).filter(Stadium.name == "FD Stadium").first()
+    if not stadium:
+        stadium = Stadium(name="FD Stadium", city="City", timezone="UTC")
+        db_session.add(stadium)
+        db_session.commit()
+
+    kickoff = datetime.utcnow() + timedelta(days=10)
+    match = Match(
+        round="Round of 32",
+        stage="Round of 32",
+        date=kickoff.strftime("%Y-%m-%d"),
+        time_str="19:00 UTC",
+        kickoff_time=kickoff,
+        team1_name="2A",
+        team2_name="2B",
+        ground=stadium.name,
+        status="scheduled",
+    )
+    db_session.add(match)
+    db_session.commit()
+    db_session.refresh(match)
+
+    def fake_get(*args, **kwargs):
+        return FakeResponse({
+            "matches": [
+                {
+                    "id": 9999,
+                    "utcDate": kickoff.isoformat() + "Z",
+                    "status": "SCHEDULED",
+                    "stage": "LAST_32",
+                    "homeTeam": {"name": "Brazil", "shortName": "Brazil", "tla": "BRA"},
+                    "awayTeam": {"name": "Argentina", "shortName": "Argentina", "tla": "ARG"},
+                }
+            ]
+        })
+
+    monkeypatch.setattr("app.football_data.requests.get", fake_get)
+    result = sync_fixtures_from_football_data(db_session)
+
+    assert result["enabled"] is True
+    assert result["updated_matches"] == 1
+    
+    db_session.refresh(match)
+    assert match.team1_name == "Brasil"
+    assert match.team2_name == "Argentina"
+
+
+def test_get_knockout_setup_possible_teams(db_session, test_users, client):
+    from app.models import Team, Match, Stadium
+    from app.routers.admin import get_possible_teams
+
+    # Preseed teams for Group A and Group B
+    teams_data = [
+        ("Brasil", "BRA", "Grupo A"),
+        ("França", "FRA", "Grupo A"),
+        ("Itália", "ITA", "Grupo A"),
+        ("Espanha", "ESP", "Grupo A"),
+        ("Argentina", "ARG", "Grupo B"),
+        ("Alemanha", "GER", "Grupo B"),
+        ("Inglaterra", "ENG", "Grupo B"),
+        ("Holanda", "NED", "Grupo B"),
+    ]
+    for name, code, group in teams_data:
+        db_session.add(Team(name=name, fifa_code=code, group_name=group))
+        
+    p1 = Team(name="2A", group_name="Knockout Placeholder", fifa_code=None)
+    p2 = Team(name="2B", group_name="Knockout Placeholder", fifa_code=None)
+    db_session.add_all([p1, p2])
+    db_session.commit()
+
+    stadium = Stadium(name="FD Stadium", city="City", timezone="UTC")
+    db_session.add(stadium)
+    db_session.commit()
+
+    # Match ID 73 is Round of 32 between 2A and 2B
+    match_73 = Match(
+        id=73,
+        round="Dezesseis-avos de Final",
+        stage="Round of 32",
+        date="2026-06-30",
+        time_str="19:00 UTC",
+        kickoff_time=datetime.utcnow() + timedelta(days=2),
+        team1_name="2A",
+        team2_name="2B",
+        ground=stadium.name,
+        status="scheduled",
+    )
+    db_session.add(match_73)
+    db_session.commit()
+
+    # Verify get_possible_teams helper
+    res_t1 = get_possible_teams(db_session, "2A")
+    assert len(res_t1) == 4
+    assert {t["name"] for t in res_t1} == {"Brasil", "França", "Itália", "Espanha"}
+
+    res_t2 = get_possible_teams(db_session, "2B")
+    assert len(res_t2) == 4
+    assert {t["name"] for t in res_t2} == {"Argentina", "Alemanha", "Inglaterra", "Holanda"}
+
+    # Recursively check Winner of Match 73: "W73"
+    res_w73 = get_possible_teams(db_session, "W73")
+    assert len(res_w73) == 8
+    assert {t["name"] for t in res_w73} == {
+        "Brasil", "França", "Itália", "Espanha",
+        "Argentina", "Alemanha", "Inglaterra", "Holanda"
+    }
+
+    # Log in as admin
+    login_res = client.post(
+        "/api/auth/login",
+        data={"username": "score_admin_user", "password": "password"}
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Query knockout-setup endpoint
+    res = client.get("/api/admin/matches/knockout-setup", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "matches" in data
+    assert len(data["matches"]) == 1
+    
+    match_data = data["matches"][0]
+    assert match_data["id"] == 73
+    assert len(match_data["possible_teams1"]) == 4
+    assert len(match_data["possible_teams2"]) == 4
+    assert match_data["possible_teams1"][0]["name"] in {"Brasil", "França", "Itália", "Espanha"}
+

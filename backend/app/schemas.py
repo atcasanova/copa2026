@@ -116,6 +116,10 @@ class MatchScoreUpdate(BaseModel):
 class MatchScoreBatchUpdate(BaseModel):
     scores: List[MatchScoreUpdate] = Field(..., min_length=1, max_length=20)
 
+class MatchDefineTeams(BaseModel):
+    team1_name: str = Field(..., min_length=2, max_length=100)
+    team2_name: str = Field(..., min_length=2, max_length=100)
+
 # Prediction Schemas
 class PredictionCreate(BaseModel):
     goals_team1: int = Field(..., ge=0)

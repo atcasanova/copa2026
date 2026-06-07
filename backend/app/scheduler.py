@@ -2,7 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .sync import sync_openfootball_data
 from .db import SessionLocal
 from .notifications import send_due_prediction_reminders
-from .football_data import sync_finished_scores_from_football_data
+from .football_data import sync_finished_scores_from_football_data, sync_fixtures_from_football_data
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import logging
@@ -44,6 +44,17 @@ def scheduled_football_data_scores_job():
     finally:
         db.close()
 
+def scheduled_football_data_fixtures_job():
+    db = SessionLocal()
+    try:
+        result = sync_fixtures_from_football_data(db, trigger="scheduled")
+        if result.get("updated_matches") or result.get("errors"):
+            logger.info(f"[Scheduler] Sincronização de confrontos (football-data.org) concluída: {result}")
+    except Exception as e:
+        logger.error(f"[Scheduler] Falha ao sincronizar confrontos do football-data.org: {str(e)}")
+    finally:
+        db.close()
+
 def openfootball_daily_sync_enabled():
     return os.getenv("OPENFOOTBALL_DAILY_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
@@ -73,6 +84,14 @@ def start_scheduler():
         'interval',
         minutes=1,
         id='football_data_scores_job',
+        replace_existing=True,
+        next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo"))
+    )
+    scheduler.add_job(
+        scheduled_football_data_fixtures_job,
+        'interval',
+        minutes=15,
+        id='football_data_fixtures_job',
         replace_existing=True,
         next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo"))
     )

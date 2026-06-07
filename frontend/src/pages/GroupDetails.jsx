@@ -45,6 +45,25 @@ export default function GroupDetails() {
   const [deletingGroup, setDeletingGroup] = useState(false)
   const rankingCardRef = useRef(null)
 
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: '',
+    message: '',
+    onConfirm: null
+  })
+
+  const showConfirm = (title, message, onConfirm) => {
+    setConfirmDialog({
+      open: true,
+      title,
+      message,
+      onConfirm: () => {
+        onConfirm()
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+      }
+    })
+  }
+
   const loadGroupDetails = async () => {
     try {
       setLoading(true)
@@ -120,16 +139,21 @@ export default function GroupDetails() {
     }
   }
 
-  const handleRegenerateCode = async () => {
-    if (!window.confirm('Tem certeza de que deseja invalidar o código antigo e gerar um novo?')) return
-    try {
-      const res = await axios.post(`/api/groups/${groupId}/invite-code/regenerate`)
-      setGroup(prev => ({ ...prev, invite_code: res.data.invite_code }))
-      setSuccessMsg('Código de convite regenerado!')
-      setTimeout(() => setSuccessMsg(''), 3000)
-    } catch (err) {
-      setError('Erro ao regenerar código.')
-    }
+  const handleRegenerateCode = () => {
+    showConfirm(
+      'Regenerar Código de Convite',
+      'Tem certeza de que deseja invalidar o código antigo e gerar um novo?',
+      async () => {
+        try {
+          const res = await axios.post(`/api/groups/${groupId}/invite-code/regenerate`)
+          setGroup(prev => ({ ...prev, invite_code: res.data.invite_code }))
+          setSuccessMsg('Código de convite regenerado!')
+          setTimeout(() => setSuccessMsg(''), 3000)
+        } catch (err) {
+          setError('Erro ao regenerar código.')
+        }
+      }
+    )
   }
 
   const handleTogglePrivacy = async () => {
@@ -154,14 +178,19 @@ export default function GroupDetails() {
     }
   }
 
-  const handleRemoveMember = async (memberUserId) => {
-    if (!window.confirm('Tem certeza de que deseja remover este membro do grupo?')) return
-    try {
-      await axios.post(`/api/groups/${groupId}/members/${memberUserId}/remove`)
-      loadGroupDetails()
-    } catch (err) {
-      alert(err.response?.data?.detail || 'Erro ao remover membro.')
-    }
+  const handleRemoveMember = (memberUserId) => {
+    showConfirm(
+      'Remover Membro do Grupo',
+      'Tem certeza de que deseja remover este membro do grupo?',
+      async () => {
+        try {
+          await axios.post(`/api/groups/${groupId}/members/${memberUserId}/remove`)
+          loadGroupDetails()
+        } catch (err) {
+          alert(err.response?.data?.detail || 'Erro ao remover membro.')
+        }
+      }
+    )
   }
 
   const handleChangeMemberRole = async (memberUserId, newRole) => {
@@ -647,6 +676,19 @@ export default function GroupDetails() {
             disabled={deletingGroup}
           >
             {deletingGroup ? 'Excluindo...' : 'Excluir definitivamente'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmDialog.open} onClose={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
+        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 'bold' }}>{confirmDialog.title}</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmDialog.message}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>Cancelar</Button>
+          <Button onClick={confirmDialog.onConfirm} color="primary" variant="contained">
+            Confirmar
           </Button>
         </DialogActions>
       </Dialog>

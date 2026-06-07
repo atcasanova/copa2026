@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   MenuItem, Select, FormControl, InputLabel, Switch, Checkbox, FormControlLabel, Alert, Snackbar, Stack,
   Divider, Accordion, AccordionSummary, AccordionDetails, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Link, Badge,
-  IconButton, Tooltip
+  IconButton, Tooltip, Autocomplete, ToggleButton, ToggleButtonGroup
 } from '@mui/material'
 import {
   ExpandMore as ExpandIcon,
@@ -137,6 +137,25 @@ export default function AdminPanel() {
   const [chargingDebtors, setChargingDebtors] = useState(false)
   const [revertPaymentTarget, setRevertPaymentTarget] = useState(null)
 
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: '',
+    message: '',
+    onConfirm: null
+  })
+
+  const showConfirm = (title, message, onConfirm) => {
+    setConfirmDialog({
+      open: true,
+      title,
+      message,
+      onConfirm: () => {
+        onConfirm()
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+      }
+    })
+  }
+
   // Invitations State
   const [inviteEmail, setInviteEmail] = useState('')
   const [invitationsList, setInvitationsList] = useState([])
@@ -147,6 +166,120 @@ export default function AdminPanel() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(true)
+
+  // 8. Knockout Setup State
+  const [matchMode, setMatchMode] = useState('scores') // 'scores' or 'knockout'
+  const [knockoutSetup, setKnockoutSetup] = useState(null)
+  const [knockoutLoading, setKnockoutLoading] = useState(false)
+  const [syncFixturesLoading, setSyncFixturesLoading] = useState(false)
+  const [knockoutForm, setKnockoutForm] = useState({})
+  const [definingTeamsMatchId, setDefiningTeamsMatchId] = useState(null)
+  const [selectedRefGroup, setSelectedRefGroup] = useState('Grupo A')
+
+  const fetchKnockoutSetup = async () => {
+    setKnockoutLoading(true)
+    setError('')
+    try {
+      const res = await axios.get('/api/admin/matches/knockout-setup')
+      setKnockoutSetup(res.data)
+      
+      const initialForm = {}
+      res.data.matches.forEach(m => {
+        initialForm[m.id] = {
+          team1_name: m.team1_name,
+          team2_name: m.team2_name
+        }
+      })
+      setKnockoutForm(initialForm)
+      
+      const groupNames = Object.keys(res.data.groups).sort()
+      if (groupNames.length > 0 && !groupNames.includes(selectedRefGroup) && selectedRefGroup !== 'third_placed') {
+        setSelectedRefGroup(groupNames[0])
+      }
+    } catch (err) {
+      console.error(err)
+      setError(err.response?.data?.detail || 'Erro ao carregar setup do mata-mata.')
+    } finally {
+      setKnockoutLoading(false)
+    }
+  }
+
+  const handleSaveKnockoutMatch = async (matchId) => {
+    const form = knockoutForm[matchId]
+    if (!form || !form.team1_name || !form.team2_name) {
+      setError('Por favor, selecione ambos os times.')
+      return
+    }
+    
+    setDefiningTeamsMatchId(matchId)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await axios.post(`/api/admin/matches/${matchId}/define-teams`, {
+        team1_name: form.team1_name,
+        team2_name: form.team2_name
+      })
+      showSuccess(res.data.message || 'Times definidos com sucesso!')
+      await fetchKnockoutSetup()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao definir os times da partida.')
+    } finally {
+      setDefiningTeamsMatchId(null)
+    }
+  }
+
+  const handleTriggerFootballDataFixturesSync = async () => {
+    setSyncFixturesLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await axios.post('/api/admin/football-data/sync-fixtures')
+      if (res.data.updated_matches > 0) {
+        showSuccess(`Sincronização concluída! ${res.data.updated_matches} confronto(s) atualizado(s).`)
+        await fetchKnockoutSetup()
+      } else {
+        showSuccess('Sincronização concluída! Nenhum novo confronto atualizado.')
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erro ao rodar sincronização de confrontos.')
+    } finally {
+      setSyncFixturesLoading(false)
+    }
+  }
+
+  const handleApplySuggestions = (matchId, sug1, sug2) => {
+    if (!sug1 || !sug2) return
+    setKnockoutForm(prev => ({
+      ...prev,
+      [matchId]: {
+        team1_name: sug1,
+        team2_name: sug2
+      }
+    }))
+  }
+
+  const handleApplyAllSuggestions = () => {
+    if (!knockoutSetup) return
+    const nextForm = { ...knockoutForm }
+    let count = 0
+    knockoutSetup.matches.forEach(m => {
+      if (m.suggested_team1 && m.suggested_team2 && (m.team1_is_placeholder || m.team2_is_placeholder)) {
+        nextForm[m.id] = {
+          team1_name: m.suggested_team1,
+          team2_name: m.suggested_team2
+        }
+        count++
+      }
+    })
+    setKnockoutForm(nextForm)
+    showSuccess(`Sugestões aplicadas ao rascunho de ${count} confronto(s).`)
+  }
+
+  useEffect(() => {
+    if (tabIndex === 'matches' && matchMode === 'knockout') {
+      fetchKnockoutSetup()
+    }
+  }, [tabIndex, matchMode])
 
   const loadFootballDataLogs = async ({ silent = false } = {}) => {
     try {
@@ -345,15 +478,20 @@ export default function AdminPanel() {
     }
   }
 
-  const handleConfirmScore = async (matchId) => {
-    if (!window.confirm('Confirmar este resultado? Os pontos serão fixados e esta pontuação não será sobrescrita pela sincronização automática.')) return
-    try {
-      await axios.post(`/api/admin/matches/${matchId}/confirm-score`)
-      showSuccess('Placar confirmado pelo administrador com sucesso!')
-      loadInitialData()
-    } catch (err) {
-      alert('Erro ao confirmar placar.')
-    }
+  const handleConfirmScore = (matchId) => {
+    showConfirm(
+      'Confirmar Resultado',
+      'Confirmar este resultado? Os pontos serão fixados e esta pontuação não será sobrescrita pela sincronização automática.',
+      async () => {
+        try {
+          await axios.post(`/api/admin/matches/${matchId}/confirm-score`)
+          showSuccess('Placar confirmado pelo administrador com sucesso!')
+          loadInitialData()
+        } catch (err) {
+          alert('Erro ao confirmar placar.')
+        }
+      }
+    )
   }
 
   const handleStatusChange = async (matchId, newStatus) => {
@@ -369,20 +507,25 @@ export default function AdminPanel() {
   // ==========================================
   // 1. Sync Actions
   // ==========================================
-  const handleTriggerInitialSeed = async () => {
-    if (!window.confirm('Iniciar o Seeding de Dados? Isso importará os times, estádios e tabela original do openfootball.')) return
-    setSyncLoading(true)
-    setSyncResult('Processando carga de dados iniciais...')
-    try {
-      const res = await axios.post('/api/admin/sync/seed')
-      setSyncResult(JSON.stringify(res.data, null, 2))
-      showSuccess('Seeding inicial concluído com sucesso!')
-      loadInitialData()
-    } catch (err) {
-      setSyncResult('Erro no seeding: ' + (err.response?.data?.detail?.msg || err.message))
-    } finally {
-      setSyncLoading(false)
-    }
+  const handleTriggerInitialSeed = () => {
+    showConfirm(
+      'Iniciar Seeding de Dados',
+      'Iniciar o Seeding de Dados? Isso importará os times, estádios e tabela original do openfootball.',
+      async () => {
+        setSyncLoading(true)
+        setSyncResult('Processando carga de dados iniciais...')
+        try {
+          const res = await axios.post('/api/admin/sync/seed')
+          setSyncResult(JSON.stringify(res.data, null, 2))
+          showSuccess('Seeding inicial concluído com sucesso!')
+          loadInitialData()
+        } catch (err) {
+          setSyncResult('Erro no seeding: ' + (err.response?.data?.detail?.msg || err.message))
+        } finally {
+          setSyncLoading(false)
+        }
+      }
+    )
   }
 
   const handleTriggerSyncJob = async () => {
@@ -441,39 +584,48 @@ export default function AdminPanel() {
   // ==========================================
   // 2. Config Actions
   // ==========================================
-  const handleUpdateMultiplier = async (e) => {
+  const handleUpdateMultiplier = (e) => {
     e.preventDefault()
     if (!selectedMultStage || !newMultValue || isNaN(newMultValue) || parseFloat(newMultValue) <= 0) {
       alert('Por favor, informe uma fase válida e um multiplicador positivo.')
       return
     }
 
-    if (!window.confirm('ATENÇÃO: Mudar multiplicadores de fase forçará o recálculo de TODOS os palpites salvos e causará alterações instantâneas no ranking. Deseja prosseguir?')) return
-
-    try {
-      await axios.put(`/api/admin/multipliers/${selectedMultStage}`, {
-        multiplier: parseFloat(newMultValue),
-        reason: multReason.trim() || null
-      })
-      
-      setSelectedMultStage('')
-      setNewMultValue('')
-      setMultReason('')
-      showSuccess('Multiplicador atualizado e apostas recalculadas com sucesso!')
-      loadInitialData()
-    } catch (err) {
-      alert('Erro ao salvar multiplicador.')
-    }
+    showConfirm(
+      'Atualizar Multiplicador',
+      'ATENÇÃO: Mudar multiplicadores de fase forçará o recálculo de TODOS os palpites salvos e causará alterações instantâneas no ranking. Deseja prosseguir?',
+      async () => {
+        try {
+          await axios.put(`/api/admin/multipliers/${selectedMultStage}`, {
+            multiplier: parseFloat(newMultValue),
+            reason: multReason.trim() || null
+          })
+          
+          setSelectedMultStage('')
+          setNewMultValue('')
+          setMultReason('')
+          showSuccess('Multiplicador atualizado e apostas recalculadas com sucesso!')
+          loadInitialData()
+        } catch (err) {
+          alert('Erro ao salvar multiplicador.')
+        }
+      }
+    )
   }
 
-  const handleForceRecalculateAll = async () => {
-    if (!window.confirm('Forçar recálculo total? Isso irá reprocessar os pontos de cada palpite e classificar novamente o ranking.')) return
-    try {
-      await axios.post('/api/admin/recalculate-all')
-      showSuccess('Recálculo de todas as apostas executado!')
-    } catch (err) {
-      alert('Erro ao forçar recálculo.')
-    }
+  const handleForceRecalculateAll = () => {
+    showConfirm(
+      'Forçar Recálculo Total',
+      'Forçar recálculo total? Isso irá reprocessar os pontos de cada palpite e classificar novamente o ranking.',
+      async () => {
+        try {
+          await axios.post('/api/admin/recalculate-all')
+          showSuccess('Recálculo de todas as apostas executado!')
+        } catch (err) {
+          alert('Erro ao forçar recálculo.')
+        }
+      }
+    )
   }
 
   const handleUpdatePredictionLockHours = async (e) => {
@@ -848,18 +1000,22 @@ export default function AdminPanel() {
     }
   }
 
-  const handleDeleteInvitation = async (invitation) => {
-    if (!window.confirm(`Excluir o convite de ${invitation.email}?`)) return
-
-    setError('')
-    setSuccess('')
-    try {
-      await axios.delete(`/api/admin/invitations/${invitation.id}`)
-      showSuccess(`Convite de ${invitation.email} excluído.`)
-      await refreshInvitations()
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Erro ao excluir convite.')
-    }
+  const handleDeleteInvitation = (invitation) => {
+    showConfirm(
+      'Excluir Convite',
+      `Excluir o convite de ${invitation.email}?`,
+      async () => {
+        setError('')
+        setSuccess('')
+        try {
+          await axios.delete(`/api/admin/invitations/${invitation.id}`)
+          showSuccess(`Convite de ${invitation.email} excluído.`)
+          await refreshInvitations()
+        } catch (err) {
+          setError(err.response?.data?.detail || 'Erro ao excluir convite.')
+        }
+      }
+    )
   }
 
   const getHiddenRegistrationUrl = () => {
@@ -879,18 +1035,22 @@ export default function AdminPanel() {
     }
   }
 
-  const handleRotateHiddenRegistrationLink = async () => {
-    if (!window.confirm('Gerar um novo link oculto? O link atual deixará de funcionar.')) return
-
-    setError('')
-    setSuccess('')
-    try {
-      const res = await axios.post('/api/admin/registration-link/rotate')
-      setHiddenRegistrationLink(res.data)
-      showSuccess('Novo link oculto de cadastro gerado.')
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Erro ao gerar novo link oculto.')
-    }
+  const handleRotateHiddenRegistrationLink = () => {
+    showConfirm(
+      'Gerar Novo Link Oculto',
+      'Gerar um novo link oculto? O link atual deixará de funcionar.',
+      async () => {
+        setError('')
+        setSuccess('')
+        try {
+          const res = await axios.post('/api/admin/registration-link/rotate')
+          setHiddenRegistrationLink(res.data)
+          showSuccess('Novo link oculto de cadastro gerado.')
+        } catch (err) {
+          setError(err.response?.data?.detail || 'Erro ao gerar novo link oculto.')
+        }
+      }
+    )
   }
 
   return (
@@ -915,171 +1075,440 @@ export default function AdminPanel() {
         <Tab value="sync" icon={<SyncIcon />} label="Sincronização" iconPosition="start" sx={{ fontWeight: 'bold' }} />
         {user?.role === 'system_admin' && <Tab value="scoring" icon={<ConfigIcon />} label="Config. Pontuação" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
         {user?.role === 'system_admin' && <Tab value="announcements" icon={<AnnIcon />} label="Publicar Comunicados" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-	        {user?.role === 'system_admin' && <Tab value="users" icon={<PeopleIcon />} label="Usuários & Acessos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-	        {user?.role === 'system_admin' && <Tab value="audit" icon={<HistoryIcon />} label="Auditoria & Exportar" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
-	        {(user?.role === 'system_admin' || user?.role === 'score_admin') && (
-	          <Tab
-              value="payments"
-	            icon={
-	              <Badge badgeContent={pendingPaymentApprovalsCount} color="warning" invisible={pendingPaymentApprovalsCount === 0} max={99}>
-	                <PaymentIcon />
-	              </Badge>
-	            }
-	            label="Pagamentos"
-	            iconPosition="start"
-	            sx={{ fontWeight: 'bold' }}
-	          />
-	        )}
+        {user?.role === 'system_admin' && <Tab value="users" icon={<PeopleIcon />} label="Usuários & Acessos" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+        {user?.role === 'system_admin' && <Tab value="audit" icon={<HistoryIcon />} label="Auditoria & Exportar" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
+        {(user?.role === 'system_admin' || user?.role === 'score_admin') && (
+          <Tab
+            value="payments"
+            icon={
+              <Badge badgeContent={pendingPaymentApprovalsCount} color="warning" invisible={pendingPaymentApprovalsCount === 0} max={99}>
+                <PaymentIcon />
+              </Badge>
+            }
+            label="Pagamentos"
+            iconPosition="start"
+            sx={{ fontWeight: 'bold' }}
+          />
+        )}
         {user?.role === 'system_admin' && <Tab value="invitations" icon={<MailIcon />} label="Convites" iconPosition="start" sx={{ fontWeight: 'bold' }} />}
       </Tabs>
 
-      {/* ==========================================
-          TAB 0: MATCHES / SCORE EDITING
-         ========================================== */}
+      {/* =========================================
+          TAB: MATCHES
+         ========================================= */}
       {tabIndex === 'matches' && (
         <Stack spacing={3}>
-          <Card>
-            <CardContent sx={{ p: 2 }}>
-              <FormControl size="small" sx={{ minWidth: 250 }}>
-                <InputLabel>Filtrar por Fase</InputLabel>
-                <Select value={filterStage} label="Filtrar por Fase" onChange={(e) => setFilterStage(e.target.value)}>
-                  {stages.map(s => (
-                    <MenuItem key={s} value={s}>
-                      {s === 'All' ? 'Todas as Fases' : s === 'Group Stage' ? 'Fase de Grupos' : s}
-                    </MenuItem>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
+            <ToggleButtonGroup
+              value={matchMode}
+              exclusive
+              onChange={(e, val) => val && setMatchMode(val)}
+              size="small"
+              color="primary"
+            >
+              <ToggleButton value="scores" sx={{ fontWeight: 'bold' }}>
+                ⚽ Gerenciar Placares
+              </ToggleButton>
+              <ToggleButton value="knockout" sx={{ fontWeight: 'bold' }}>
+                🏆 Definir Confrontos Eliminatórios
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+
+          {matchMode === 'scores' && (
+            <>
+              <Card>
+                <CardContent sx={{ p: 2 }}>
+                  <FormControl size="small" sx={{ minWidth: 250 }}>
+                    <InputLabel>Filtrar por Fase</InputLabel>
+                    <Select value={filterStage} label="Filtrar por Fase" onChange={(e) => setFilterStage(e.target.value)}>
+                      {stages.map(s => (
+                        <MenuItem key={s} value={s}>
+                          {s === 'All' ? 'Todas as Fases' : s === 'Group Stage' ? 'Fase de Grupos' : s}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </CardContent>
+              </Card>
+
+              {matchTimeGroups.length === 0 ? (
+                <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  Nenhuma partida encontrada para o filtro selecionado.
+                </Alert>
+              ) : (
+                <Stack spacing={3}>
+                  {matchTimeGroups.map(group => (
+                    <Card key={group.key}>
+                      <CardContent sx={{ p: 0 }}>
+                        <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid #1f2937' }}>
+                          <Box>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+                              {formatDateTime(group.kickoff_time)}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {group.matches.length} partida(s) neste horário
+                            </Typography>
+                          </Box>
+                          <Button
+                            variant="contained"
+                            color="primary"
+                            startIcon={<SaveIcon />}
+                            disabled={savingScoreGroup === group.key}
+                            onClick={() => handleSaveScoreGroup(group.key, group.matches)}
+                          >
+                            {savingScoreGroup === group.key ? 'Salvando...' : 'Salvar este horário'}
+                          </Button>
+                        </Box>
+
+                        <Stack spacing={1.5} sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+                          {group.matches.map(match => {
+                            const draft = getScoreDraft(match.id)
+                            const isKnockout = match.stage !== 'Group Stage'
+                            return (
+                              <Box
+                                key={match.id}
+                                sx={{
+                                  p: { xs: 1.5, sm: 2 },
+                                  borderRadius: 2,
+                                  border: '1px solid',
+                                  borderColor: 'divider',
+                                  bgcolor: 'background.default'
+                                }}
+                              >
+                                <Stack spacing={1.5}>
+                                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                    <Box sx={{ minWidth: 0 }}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 600 }}>
+                                        {match.round} · ID #{match.id}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {match.ground}
+                                      </Typography>
+                                    </Box>
+                                    <Stack direction="row" spacing={1} alignItems="center" justifyContent={{ xs: 'space-between', sm: 'flex-end' }}>
+                                      <Chip label={match.status.replace('_', ' ')} color={match.status === 'score_confirmed' ? 'success' : 'default'} size="small" sx={{ fontWeight: 'bold', textTransform: 'capitalize' }} />
+                                      <Select
+                                        size="small"
+                                        value={match.status}
+                                        onChange={(e) => handleStatusChange(match.id, e.target.value)}
+                                        sx={{ height: 30, fontSize: '0.75rem', minWidth: 116 }}
+                                      >
+                                        <MenuItem value="scheduled">Agendado</MenuItem>
+                                        <MenuItem value="score_pending_review" disabled>Revisar</MenuItem>
+                                        <MenuItem value="score_confirmed" disabled>Confirmado</MenuItem>
+                                        <MenuItem value="postponed">Adiado</MenuItem>
+                                        <MenuItem value="cancelled">Cancelado</MenuItem>
+                                      </Select>
+                                    </Stack>
+                                  </Stack>
+
+                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 0.75, sm: 1.5 }, width: '100%' }}>
+                                    {renderAdminTeamLabel(match, 1)}
+                                    {renderScoreInput(match.id, 'score_ft_team1', draft.score_ft_team1)}
+                                    <Typography variant="body2" sx={{ fontWeight: 800, color: 'text.secondary' }}>x</Typography>
+                                    {renderScoreInput(match.id, 'score_ft_team2', draft.score_ft_team2)}
+                                    {renderAdminTeamLabel(match, 2)}
+                                  </Box>
+
+                                  {isKnockout && (
+                                    <Grid container spacing={1.5}>
+                                      <Grid item xs={12} sm={6}>
+                                        <Box sx={{ p: 1.25, borderRadius: 2, border: '1px solid #1f2937' }}>
+                                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mb: 1 }}>
+                                            Prorrogação
+                                          </Typography>
+                                          <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+                                            {renderScoreInput(match.id, 'score_et_team1', draft.score_et_team1)}
+                                            <Typography variant="body2">x</Typography>
+                                            {renderScoreInput(match.id, 'score_et_team2', draft.score_et_team2)}
+                                          </Stack>
+                                        </Box>
+                                      </Grid>
+                                      <Grid item xs={12} sm={6}>
+                                        <Box sx={{ p: 1.25, borderRadius: 2, border: '1px solid #1f2937' }}>
+                                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mb: 1 }}>
+                                            Pênaltis
+                                          </Typography>
+                                          <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+                                            {renderScoreInput(match.id, 'score_pen_team1', draft.score_pen_team1)}
+                                            <Typography variant="body2">x</Typography>
+                                            {renderScoreInput(match.id, 'score_pen_team2', draft.score_pen_team2)}
+                                          </Stack>
+                                        </Box>
+                                      </Grid>
+                                    </Grid>
+                                  )}
+
+                                  <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+                                    {match.status === 'score_pending_review' && (
+                                      <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />} onClick={() => handleConfirmScore(match.id)}>
+                                        Confirmar
+                                      </Button>
+                                    )}
+                                  </Stack>
+                                </Stack>
+                              </Box>
+                            )
+                          })}
+                        </Stack>
+                      </CardContent>
+                    </Card>
                   ))}
-                </Select>
-              </FormControl>
-            </CardContent>
-          </Card>
+                </Stack>
+              )}
+            </>
+          )}
 
-	          {matchTimeGroups.length === 0 ? (
-	            <Alert severity="info" sx={{ borderRadius: 2 }}>
-	              Nenhuma partida encontrada para o filtro selecionado.
-	            </Alert>
-	          ) : (
-	            <Stack spacing={3}>
-	              {matchTimeGroups.map(group => (
-	                <Card key={group.key}>
-	                  <CardContent sx={{ p: 0 }}>
-	                    <Box sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid #1f2937' }}>
-	                      <Box>
-	                        <Typography variant="subtitle1" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
-	                          {formatDateTime(group.kickoff_time)}
-	                        </Typography>
-	                        <Typography variant="caption" color="text.secondary">
-	                          {group.matches.length} partida(s) neste horário
-	                        </Typography>
-	                      </Box>
-	                      <Button
-	                        variant="contained"
-	                        color="primary"
-	                        startIcon={<SaveIcon />}
-	                        disabled={savingScoreGroup === group.key}
-	                        onClick={() => handleSaveScoreGroup(group.key, group.matches)}
-	                      >
-	                        {savingScoreGroup === group.key ? 'Salvando...' : 'Salvar este horário'}
-	                      </Button>
-	                    </Box>
+          {matchMode === 'knockout' && (
+            <Box>
+              {knockoutLoading && !knockoutSetup ? (
+                <Alert severity="info">Carregando confrontos...</Alert>
+              ) : !knockoutSetup ? (
+                <Alert severity="warning">
+                  {error || 'Não foi possível carregar a configuração do mata-mata. Certifique-se de que o seed de dados inicial (times/estádios/jogos) foi realizado.'}
+                </Alert>
+              ) : (
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={8}>
+                    <Stack spacing={3}>
+                      {/* Top actions card */}
+                      <Card>
+                        <CardContent sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+                          <Box sx={{ maxWidth: '60%' }}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', fontFamily: 'Outfit' }}>
+                              Definição Automática de Confrontos
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Sincronize com a API do football-data.org ou aplique as sugestões baseadas na classificação da Fase de Grupos.
+                            </Typography>
+                          </Box>
+                          <Stack direction="row" spacing={2}>
+                            <Button
+                              variant="outlined"
+                              color="secondary"
+                              onClick={handleApplyAllSuggestions}
+                              disabled={!knockoutSetup || knockoutSetup.matches.length === 0}
+                            >
+                              Usar Todas as Sugestões
+                            </Button>
+                            <Button
+                              variant="contained"
+                              color="primary"
+                              startIcon={<SyncIcon />}
+                              onClick={handleTriggerFootballDataFixturesSync}
+                              disabled={syncFixturesLoading}
+                            >
+                              {syncFixturesLoading ? 'Sincronizando...' : 'Sincronizar via API'}
+                            </Button>
+                          </Stack>
+                        </CardContent>
+                      </Card>
 
-	                    <Stack spacing={1.5} sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-	                      {group.matches.map(match => {
-	                        const draft = getScoreDraft(match.id)
-	                        const isKnockout = match.stage !== 'Group Stage'
-	                        return (
-	                          <Box
-	                            key={match.id}
-	                            sx={{
-	                              p: { xs: 1.5, sm: 2 },
-	                              borderRadius: 2,
-	                              border: '1px solid',
-	                              borderColor: 'divider',
-	                              bgcolor: 'background.default'
-	                            }}
-	                          >
-	                            <Stack spacing={1.5}>
-	                              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
-	                                <Box sx={{ minWidth: 0 }}>
-	                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 600 }}>
-	                                    {match.round} · ID #{match.id}
-	                                  </Typography>
-	                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-	                                    {match.ground}
-	                                  </Typography>
-	                                </Box>
-	                                <Stack direction="row" spacing={1} alignItems="center" justifyContent={{ xs: 'space-between', sm: 'flex-end' }}>
-	                                  {renderMatchStatusChip(match.status)}
-	                                  <Select
-	                                    size="small"
-	                                    value={match.status}
-	                                    onChange={(e) => handleStatusChange(match.id, e.target.value)}
-	                                    sx={{ height: 30, fontSize: '0.75rem', minWidth: 116 }}
-	                                  >
-	                                    <MenuItem value="scheduled">Agendado</MenuItem>
-	                                    <MenuItem value="score_pending_review" disabled>Revisar</MenuItem>
-	                                    <MenuItem value="score_confirmed" disabled>Confirmado</MenuItem>
-	                                    <MenuItem value="postponed">Adiado</MenuItem>
-	                                    <MenuItem value="cancelled">Cancelado</MenuItem>
-	                                  </Select>
-	                                </Stack>
-	                              </Stack>
+                      {/* Matches list */}
+                      {!knockoutSetup || knockoutSetup.matches.length === 0 ? (
+                        <Alert severity="info">Nenhum jogo eliminatório encontrado.</Alert>
+                      ) : (
+                        knockoutSetup.matches.map(m => {
+                          const sug1 = m.suggested_team1
+                          const sug2 = m.suggested_team2
+                          const formVal = knockoutForm[m.id] || { team1_name: '', team2_name: '' }
+                          const isModified = formVal.team1_name !== m.team1_name || formVal.team2_name !== m.team2_name
+                          
+                          return (
+                            <Card key={m.id} sx={{ borderLeft: '4px solid', borderColor: m.team1_is_placeholder || m.team2_is_placeholder ? 'warning.main' : 'success.main' }}>
+                              <CardContent sx={{ p: 3 }}>
+                                <Stack spacing={2}>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <Box>
+                                      <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 'bold' }}>
+                                        {m.stage} · {m.round}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        ID #{m.id} · {m.date} {m.time_str}
+                                      </Typography>
+                                    </Box>
+                                    <Chip
+                                      label={m.team1_is_placeholder || m.team2_is_placeholder ? 'Aguardando Times' : 'Confronto Definido'}
+                                      color={m.team1_is_placeholder || m.team2_is_placeholder ? 'warning' : 'success'}
+                                      size="small"
+                                      sx={{ fontWeight: 'bold' }}
+                                    />
+                                  </Box>
+                                  
+                                  {/* Current Teams Display */}
+                                  <Box sx={{ bgcolor: 'action.hover', p: 1.5, borderRadius: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+                                    <Typography variant="body2" sx={{ fontWeight: m.team1_is_placeholder ? 'normal' : 'bold', color: m.team1_is_placeholder ? 'text.secondary' : 'text.primary' }}>
+                                      {m.team1_name}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">VS</Typography>
+                                    <Typography variant="body2" sx={{ fontWeight: m.team2_is_placeholder ? 'normal' : 'bold', color: m.team2_is_placeholder ? 'text.secondary' : 'text.primary' }}>
+                                      {m.team2_name}
+                                    </Typography>
+                                  </Box>
 
-	                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 0.75, sm: 1.5 }, width: '100%' }}>
-	                                {renderAdminTeamLabel(match, 1)}
-	                                {renderScoreInput(match.id, 'score_ft_team1', draft.score_ft_team1)}
-	                                <Typography variant="body2" sx={{ fontWeight: 800, color: 'text.secondary' }}>x</Typography>
-	                                {renderScoreInput(match.id, 'score_ft_team2', draft.score_ft_team2)}
-	                                {renderAdminTeamLabel(match, 2)}
-	                              </Box>
+                                  {/* Selectors and Action */}
+                                  <Grid container spacing={2} alignItems="center">
+                                    <Grid item xs={12} sm={4.5}>
+                                      <Autocomplete
+                                        size="small"
+                                        options={m.possible_teams1 || []}
+                                        getOptionLabel={(option) => option.name}
+                                        value={(m.possible_teams1 || []).find(t => t.name === formVal.team1_name) || null}
+                                        onChange={(event, newValue) => {
+                                          setKnockoutForm(prev => ({
+                                            ...prev,
+                                            [m.id]: {
+                                              ...prev[m.id],
+                                              team1_name: newValue ? newValue.name : ''
+                                            }
+                                          }))
+                                        }}
+                                        renderInput={(params) => <TextField {...params} label="Time 1" />}
+                                      />
+                                      {sug1 && formVal.team1_name !== sug1 && (
+                                        <Button
+                                          size="small"
+                                          color="secondary"
+                                          onClick={() => handleApplySuggestions(m.id, sug1, formVal.team2_name || sug2)}
+                                          sx={{ mt: 0.5, fontSize: '0.75rem', p: 0, minWidth: 0, textTransform: 'none' }}
+                                        >
+                                          Sugerido: {sug1}
+                                        </Button>
+                                      )}
+                                    </Grid>
+                                    <Grid item xs={12} sm={1} align="center">
+                                      <Typography variant="body2" color="text.secondary">x</Typography>
+                                    </Grid>
+                                    <Grid item xs={12} sm={4.5}>
+                                      <Autocomplete
+                                        size="small"
+                                        options={m.possible_teams2 || []}
+                                        getOptionLabel={(option) => option.name}
+                                        value={(m.possible_teams2 || []).find(t => t.name === formVal.team2_name) || null}
+                                        onChange={(event, newValue) => {
+                                          setKnockoutForm(prev => ({
+                                            ...prev,
+                                            [m.id]: {
+                                              ...prev[m.id],
+                                              team2_name: newValue ? newValue.name : ''
+                                            }
+                                          }))
+                                        }}
+                                        renderInput={(params) => <TextField {...params} label="Time 2" />}
+                                      />
+                                      {sug2 && formVal.team2_name !== sug2 && (
+                                        <Button
+                                          size="small"
+                                          color="secondary"
+                                          onClick={() => handleApplySuggestions(m.id, formVal.team1_name || sug1, sug2)}
+                                          sx={{ mt: 0.5, fontSize: '0.75rem', p: 0, minWidth: 0, textTransform: 'none' }}
+                                        >
+                                          Sugerido: {sug2}
+                                        </Button>
+                                      )}
+                                    </Grid>
+                                    <Grid item xs={12} sm={2}>
+                                      <Button
+                                        variant="contained"
+                                        color="primary"
+                                        fullWidth
+                                        disabled={!isModified || definingTeamsMatchId === m.id}
+                                        onClick={() => handleSaveKnockoutMatch(m.id)}
+                                      >
+                                        {definingTeamsMatchId === m.id ? 'Salvar...' : 'Salvar'}
+                                      </Button>
+                                    </Grid>
+                                  </Grid>
+                                </Stack>
+                              </CardContent>
+                            </Card>
+                          )
+                        })
+                      )}
+                    </Stack>
+                  </Grid>
 
-	                              {isKnockout && (
-	                                <Grid container spacing={1.5}>
-	                                  <Grid item xs={12} sm={6}>
-	                                    <Box sx={{ p: 1.25, borderRadius: 2, border: '1px solid #1f2937' }}>
-	                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mb: 1 }}>
-	                                        Prorrogação
-	                                      </Typography>
-	                                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
-	                                        {renderScoreInput(match.id, 'score_et_team1', draft.score_et_team1)}
-	                                        <Typography variant="body2">x</Typography>
-	                                        {renderScoreInput(match.id, 'score_et_team2', draft.score_et_team2)}
-	                                      </Stack>
-	                                    </Box>
-	                                  </Grid>
-	                                  <Grid item xs={12} sm={6}>
-	                                    <Box sx={{ p: 1.25, borderRadius: 2, border: '1px solid #1f2937' }}>
-	                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mb: 1 }}>
-	                                        Pênaltis
-	                                      </Typography>
-	                                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
-	                                        {renderScoreInput(match.id, 'score_pen_team1', draft.score_pen_team1)}
-	                                        <Typography variant="body2">x</Typography>
-	                                        {renderScoreInput(match.id, 'score_pen_team2', draft.score_pen_team2)}
-	                                      </Stack>
-	                                    </Box>
-	                                  </Grid>
-	                                </Grid>
-	                              )}
+                  {/* Reference standings column */}
+                  <Grid item xs={12} md={4}>
+                    <Card sx={{ position: 'sticky', top: 20 }}>
+                      <CardContent sx={{ p: 2 }}>
+                        <Typography variant="h6" sx={{ mb: 2, fontWeight: 700, fontFamily: 'Outfit' }}>
+                          Classificação de Referência
+                        </Typography>
+                        
+                        <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+                          <InputLabel>Grupo / Classificação</InputLabel>
+                          <Select
+                            value={selectedRefGroup}
+                            label="Grupo / Classificação"
+                            onChange={(e) => setSelectedRefGroup(e.target.value)}
+                          >
+                            {Object.keys(knockoutSetup.groups || {}).sort().map(g => (
+                              <MenuItem key={g} value={g}>{g}</MenuItem>
+                            ))}
+                            <MenuItem value="third_placed">Melhores 3º Colocados</MenuItem>
+                          </Select>
+                        </FormControl>
 
-	                              <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
-	                                {match.status === 'score_pending_review' && (
-	                                  <Button size="small" variant="contained" color="success" startIcon={<CheckIcon />} onClick={() => handleConfirmScore(match.id)}>
-	                                    Confirmar
-	                                  </Button>
-	                                )}
-	                              </Stack>
-	                            </Stack>
-	                          </Box>
-	                        )
-	                      })}
-	                    </Stack>
-	                  </CardContent>
-	                </Card>
-	              ))}
-	            </Stack>
-	          )}
-	        </Stack>
-	      )}
+                        {selectedRefGroup === 'third_placed' ? (
+                          <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }}>Pos</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }}>Time</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }} align="right">Pts</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }} align="right">SG</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {(knockoutSetup.third_placed || []).map((t, idx) => (
+                                  <TableRow key={t.team_name} sx={{ bgcolor: idx < 8 ? 'action.selected' : 'transparent' }}>
+                                    <TableCell sx={{ px: 1 }}>{idx + 1}</TableCell>
+                                    <TableCell sx={{ px: 1, fontWeight: idx < 8 ? 'bold' : 'normal' }}>
+                                      {t.team_name} ({t.group_name.replace('Grupo ', '')})
+                                    </TableCell>
+                                    <TableCell sx={{ px: 1 }} align="right">{t.points}</TableCell>
+                                    <TableCell sx={{ px: 1 }} align="right">{t.goal_difference}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        ) : (
+                          <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }}>Pos</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }}>Time</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }} align="right">Pts</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', px: 1 }} align="right">SG</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {(knockoutSetup.groups?.[selectedRefGroup] || []).map((t, idx) => (
+                                  <TableRow key={t.team_name} sx={{ bgcolor: idx < 2 ? 'action.selected' : 'transparent' }}>
+                                    <TableCell sx={{ px: 1 }}>{idx + 1}</TableCell>
+                                    <TableCell sx={{ px: 1, fontWeight: idx < 2 ? 'bold' : 'normal' }}>{t.team_name}</TableCell>
+                                    <TableCell sx={{ px: 1 }} align="right">{t.points}</TableCell>
+                                    <TableCell sx={{ px: 1 }} align="right">{t.goal_difference}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              )}
+            </Box>
+          )}
+        </Stack>
+      )}
 
       {/* ==========================================
           TAB 1: INTEGRATION / SYNC
@@ -2254,6 +2683,19 @@ export default function AdminPanel() {
         <DialogActions>
           <Button onClick={() => setDeleteUserDialogOpen(false)}>Cancelar</Button>
           <Button onClick={handleConfirmDeleteUser} variant="contained" color="error">Remover Usuário</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmDialog.open} onClose={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
+        <DialogTitle sx={{ fontFamily: 'Outfit', fontWeight: 'bold' }}>{confirmDialog.title}</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmDialog.message}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>Cancelar</Button>
+          <Button onClick={confirmDialog.onConfirm} color="primary" variant="contained">
+            Confirmar
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

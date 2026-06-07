@@ -23,11 +23,23 @@ def list_matches(
 ):
     query = db.query(Match)
     
-    # Filter by unlocked stages for standard users
+    # Filter by unlocked stages or defined matchups for standard users
     if current_user.role not in ["system_admin", "score_admin"]:
         from .utils import get_unlocked_stages
+        from ..models import Team
+        from sqlalchemy import or_
+        from sqlalchemy.orm import aliased
+        
         unlocked = get_unlocked_stages(db)
-        query = query.filter(Match.stage.in_(unlocked))
+        t1 = aliased(Team)
+        t2 = aliased(Team)
+        query = query.join(t1, Match.team1_name == t1.name).join(t2, Match.team2_name == t2.name)
+        query = query.filter(
+            or_(
+                Match.stage.in_(unlocked),
+                (t1.group_name != "Knockout Placeholder") & (t2.group_name != "Knockout Placeholder")
+            )
+        )
         
     if date:
         query = query.filter(Match.date == date)
