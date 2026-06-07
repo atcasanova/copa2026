@@ -9,7 +9,7 @@ from uuid import UUID
 from PIL import Image, UnidentifiedImageError
 
 from ..db import get_db
-from ..models import User, PixConfig, AuditLog
+from ..models import User, PixConfig, AuditLog, SystemSetting
 from ..schemas import PixConfigResponse, PixConfigUpdate, UserResponse
 from ..auth import get_current_active_user
 from ..notifications import send_payment_approval_notification, send_whatsapp_message
@@ -384,17 +384,232 @@ def _sanitize_debtor_name(display_name: str) -> str:
     return clean[:80] or "Participante"
 
 
-def _format_payment_charge_message(users: list[User]) -> str:
+from pydantic import BaseModel
+
+class ChargeTemplateUpdate(BaseModel):
+    template: str
+
+
+@router.get("/admin/charge-template")
+def get_payment_charge_template(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if current_user.role not in ["system_admin", "score_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores."
+        )
+
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_charge_template").first()
+    default_val = (
+        "📢 *BOLÃO 2026 INFORMA:*\n\n"
+        "O VAR financeiro revisou o lance e encontrou pendências:\n"
+        "{{devedores}}\n\n"
+        "Ainda não pagaram o bolão! 😅\n"
+        "Sem pagar não pode palpitar! Faça o pagamento 👇"
+    )
+    template = setting.value if setting else default_val
+
+    approved_registry_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True
+    ).count()
+
+    approved_payment_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status == "approved"
+    ).count()
+
+    total_registered = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"])
+    ).count()
+
+    debtors_query = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status != "approved"
+    )
+    debtors_count = debtors_query.count()
+    debtors_list = sorted(debtors_query.all(), key=user_name_sort_key)
+    names = "\n".join(_sanitize_debtor_name(user.display_name) for user in debtors_list)
+
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    fee = float(config.entry_fee or 0.0) if config else 0.0
+    total_val = approved_payment_count * fee
+
+    taxa_str = f"R$ {fee:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    valor_str = f"R$ {total_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    return {
+        "template": template,
+        "values": {
+            "devedores": names,
+            "aprovados": approved_registry_count,
+            "aprovados_pagos": approved_payment_count,
+            "valor": valor_str,
+            "total_cadastrados": total_registered,
+            "devedores_qtd": debtors_count,
+            "taxa_inscricao": taxa_str
+        }
+    }
+
+
+@router.put("/admin/charge-template")
+def update_payment_charge_template(
+    payload: ChargeTemplateUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if current_user.role not in ["system_admin", "score_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores."
+        )
+
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_charge_template").first()
+    if not setting:
+        setting = SystemSetting(key="payment_charge_template", value=payload.template)
+        db.add(setting)
+    else:
+        setting.value = payload.template
+    db.commit()
+    return {"template": setting.value}
+
+
+class ApprovalTemplateUpdate(BaseModel):
+    template: str
+
+
+@router.get("/admin/approval-template")
+def get_payment_approval_template(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if current_user.role not in ["system_admin", "score_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores."
+        )
+
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_approval_template").first()
+    default_val = (
+        "💰 Pagamento de {{usuario}} foi aprovado!\n\n"
+        "total na poupança do Gliva: *{{valor}}*\n\n"
+        "Previsão de pagamentos para os 3 primeiros:\n"
+        "{{prizepool}}"
+    )
+    template = setting.value if setting else default_val
+
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    fee = float(config.entry_fee or 0.0) if config else 0.0
+    
+    approved_payment_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status == "approved"
+    ).count()
+    
+    total_val = approved_payment_count * fee
+    
+    pool = {
+        "first_place": total_val * 0.5,
+        "second_place": total_val * 0.3,
+        "third_place": total_val * 0.2,
+    }
+    
+    from ..notifications import _format_brl
+    prizepool_text = (
+        f"🥇 1º lugar: {_format_brl(pool['first_place'])}\n"
+        f"🥈 2º lugar: {_format_brl(pool['second_place'])}\n"
+        f"🥉 3º lugar: {_format_brl(pool['third_place'])}"
+    )
+    
+    taxa_str = _format_brl(fee)
+    valor_str = _format_brl(total_val)
+
+    return {
+        "template": template,
+        "values": {
+            "usuario": "Fulano de Tal",
+            "valor": valor_str,
+            "prizepool": prizepool_text,
+            "aprovados_pagos": approved_payment_count,
+            "taxa_inscricao": taxa_str
+        }
+    }
+
+
+@router.put("/admin/approval-template")
+def update_payment_approval_template(
+    payload: ApprovalTemplateUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if current_user.role not in ["system_admin", "score_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores."
+        )
+
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_approval_template").first()
+    if not setting:
+        setting = SystemSetting(key="payment_approval_template", value=payload.template)
+        db.add(setting)
+    else:
+        setting.value = payload.template
+    db.commit()
+    return {"template": setting.value}
+
+
+def _format_payment_charge_message(db: Session, users: list[User]) -> str:
     names = "\n".join(_sanitize_debtor_name(user.display_name) for user in users)
-    return "\n".join([
-        "\U0001f4e2 *BOLÃO 2026 INFORMA:*",
-        "",
-        "\U0001f9fe O VAR financeiro revisou o lance e encontrou pendências:",
-        names,
-        "",
-        "Ainda não pagaram o bolão! \U0001f605",
-        "Sem pagar não pode palpitar! Faça o pagamento \U0001f447",
-    ])
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_charge_template").first()
+    if setting and setting.value:
+        template = setting.value
+    else:
+        template = (
+            "📢 *BOLÃO 2026 INFORMA:*\n\n"
+            "O VAR financeiro revisou o lance e encontrou pendências:\n"
+            "{{devedores}}\n\n"
+            "Ainda não pagaram o bolão! 😅\n"
+            "Sem pagar não pode palpitar! Faça o pagamento 👇"
+        )
+
+    approved_registry_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True
+    ).count()
+
+    approved_payment_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status == "approved"
+    ).count()
+
+    total_registered = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"])
+    ).count()
+
+    debtors_count = len(users)
+
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    fee = float(config.entry_fee or 0.0) if config else 0.0
+    total_val = approved_payment_count * fee
+
+    taxa_str = f"R$ {fee:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    valor_str = f"R$ {total_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    msg = template
+    msg = msg.replace("{{devedores}}", names)
+    msg = msg.replace("{{aprovados}}", str(approved_registry_count))
+    msg = msg.replace("{{aprovados_pagos}}", str(approved_payment_count))
+    msg = msg.replace("{{valor}}", valor_str)
+    msg = msg.replace("{{total_cadastrados}}", str(total_registered))
+    msg = msg.replace("{{devedores_qtd}}", str(debtors_count))
+    msg = msg.replace("{{taxa_inscricao}}", taxa_str)
+    return msg
 
 
 @router.post("/admin/charge-debtors")
@@ -433,6 +648,7 @@ def admin_charge_payment_debtors(
 
     debtors = sorted(db.query(User).filter(
         User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
         User.payment_status != "approved"
     ).all(), key=user_name_sort_key)
 
@@ -442,7 +658,8 @@ def admin_charge_payment_debtors(
             detail="Não há participantes com pagamento pendente."
         )
 
-    first_sent = send_whatsapp_message(_format_payment_charge_message(debtors))
+    charge_msg = _format_payment_charge_message(db, debtors)
+    first_sent = send_whatsapp_message(charge_msg)
     if not first_sent:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

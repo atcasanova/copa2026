@@ -86,7 +86,11 @@ def _format_brl(value: float) -> str:
 def get_payment_pool_summary(db: Session) -> dict:
     config = db.query(PixConfig).filter(PixConfig.id == 1).first()
     entry_fee = float(config.entry_fee) if config and config.entry_fee is not None else 0.0
-    approved_count = db.query(User).filter(User.payment_status == "approved").count()
+    approved_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status == "approved"
+    ).count()
     total_collected = entry_fee * approved_count
     return {
         "approved_count": approved_count,
@@ -97,24 +101,40 @@ def get_payment_pool_summary(db: Session) -> dict:
     }
 
 
-def format_payment_approval_message(display_name: str, payment_pool: dict | None = None) -> str:
+def format_payment_approval_message(db: Session, display_name: str, payment_pool: dict) -> str:
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_approval_template").first()
+    default_val = (
+        "💰 Pagamento de {{usuario}} foi aprovado!\n\n"
+        "total na poupança do Gliva: *{{valor}}*\n\n"
+        "Previsão de pagamentos para os 3 primeiros:\n"
+        "{{prizepool}}"
+    )
+    template = setting.value if setting and setting.value else default_val
+
+    prizepool_text = (
+        f"🥇 1º lugar: {_format_brl(payment_pool['first_place'])}\n"
+        f"🥈 2º lugar: {_format_brl(payment_pool['second_place'])}\n"
+        f"🥉 3º lugar: {_format_brl(payment_pool['third_place'])}"
+    )
+
     safe_display_name = " ".join((display_name or "Participante").split())
-    lines = [f"\U0001f4b0 Pagamento de {safe_display_name} foi aprovado!"]
-    if payment_pool:
-        lines.extend([
-            "",
-            f"total na poupança do Gliva: *{_format_brl(payment_pool['total_collected'])}*",
-            "",
-            "Previsão de pagamentos para os 3 primeiros:",
-            f"\U0001f947 1º lugar: {_format_brl(payment_pool['first_place'])}",
-            f"\U0001f948 2º lugar: {_format_brl(payment_pool['second_place'])}",
-            f"\U0001f949 3º lugar: {_format_brl(payment_pool['third_place'])}",
-        ])
-    return "\n".join(lines)
+    
+    msg = template
+    msg = msg.replace("{{usuario}}", safe_display_name)
+    msg = msg.replace("{{valor}}", _format_brl(payment_pool['total_collected']))
+    msg = msg.replace("{{prizepool}}", prizepool_text)
+    
+    # Extra helpers
+    msg = msg.replace("{{aprovados_pagos}}", str(payment_pool['approved_count']))
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    fee = float(config.entry_fee or 0.0) if config else 0.0
+    msg = msg.replace("{{taxa_inscricao}}", _format_brl(fee))
+    
+    return msg
 
 
 def send_payment_approval_notification(db: Session, user: User) -> bool:
-    return send_whatsapp_message(format_payment_approval_message(user.display_name, get_payment_pool_summary(db)))
+    return send_whatsapp_message(format_payment_approval_message(db, user.display_name, get_payment_pool_summary(db)))
 
 
 def _format_local_datetime(dt: datetime) -> str:

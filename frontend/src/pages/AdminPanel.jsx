@@ -116,6 +116,12 @@ export default function AdminPanel() {
   const [annTarget, setAnnTarget] = useState('global')
   const [annTargetGroup, setAnnTargetGroup] = useState('')
   const [groups, setGroups] = useState([])
+  const [chargeTemplate, setChargeTemplate] = useState('')
+  const [placeholderValues, setPlaceholderValues] = useState({})
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [approvalTemplate, setApprovalTemplate] = useState('')
+  const [approvalValues, setApprovalValues] = useState({})
+  const [savingApprovalTemplate, setSavingApprovalTemplate] = useState(false)
 
   // 4. Users State
   const [usersList, setUsersList] = useState([])
@@ -674,6 +680,85 @@ export default function AdminPanel() {
       alert('Erro ao publicar comunicado.')
     }
   }
+
+  const loadChargeTemplate = async () => {
+    try {
+      const res = await axios.get('/api/payments/admin/charge-template')
+      setChargeTemplate(res.data.template)
+      setPlaceholderValues(res.data.values || {})
+    } catch (err) {
+      setError('Erro ao carregar o modelo de cobrança.')
+    }
+  }
+
+  const compilePreview = (tmpl) => {
+    if (!tmpl) return ''
+    return tmpl
+      .split('{{devedores}}').join(placeholderValues.devedores || '')
+      .split('{{aprovados}}').join(String(placeholderValues.aprovados ?? 0))
+      .split('{{aprovados_pagos}}').join(String(placeholderValues.aprovados_pagos ?? 0))
+      .split('{{valor}}').join(placeholderValues.valor || 'R$ 0,00')
+      .split('{{total_cadastrados}}').join(String(placeholderValues.total_cadastrados ?? 0))
+      .split('{{devedores_qtd}}').join(String(placeholderValues.devedores_qtd ?? 0))
+      .split('{{taxa_inscricao}}').join(placeholderValues.taxa_inscricao || 'R$ 0,00')
+  }
+
+  const handleSaveChargeTemplate = async (e) => {
+    e.preventDefault()
+    setSavingTemplate(true)
+    setError('')
+    setSuccess('')
+    try {
+      await axios.put('/api/payments/admin/charge-template', { template: chargeTemplate })
+      showSuccess('Modelo de cobrança salvo com sucesso!')
+    } catch (err) {
+      setError('Erro ao salvar modelo de cobrança.')
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  const loadApprovalTemplate = async () => {
+    try {
+      const res = await axios.get('/api/payments/admin/approval-template')
+      setApprovalTemplate(res.data.template)
+      setApprovalValues(res.data.values || {})
+    } catch (err) {
+      setError('Erro ao carregar o modelo de aprovação de pagamento.')
+    }
+  }
+
+  const compileApprovalPreview = (tmpl) => {
+    if (!tmpl) return ''
+    return tmpl
+      .split('{{usuario}}').join(approvalValues.usuario || 'Fulano de Tal')
+      .split('{{valor}}').join(approvalValues.valor || 'R$ 0,00')
+      .split('{{prizepool}}').join(approvalValues.prizepool || '')
+      .split('{{aprovados_pagos}}').join(String(approvalValues.aprovados_pagos ?? 0))
+      .split('{{taxa_inscricao}}').join(approvalValues.taxa_inscricao || 'R$ 0,00')
+  }
+
+  const handleSaveApprovalTemplate = async (e) => {
+    e.preventDefault()
+    setSavingApprovalTemplate(true)
+    setError('')
+    setSuccess('')
+    try {
+      await axios.put('/api/payments/admin/approval-template', { template: approvalTemplate })
+      showSuccess('Modelo de aprovação de pagamento salvo com sucesso!')
+    } catch (err) {
+      setError('Erro ao salvar modelo de aprovação de pagamento.')
+    } finally {
+      setSavingApprovalTemplate(false)
+    }
+  }
+
+  useEffect(() => {
+    if (tabIndex === 'announcements' && user) {
+      loadChargeTemplate()
+      loadApprovalTemplate()
+    }
+  }, [tabIndex, user])
 
   // ==========================================
   // 4. Users Actions
@@ -1958,81 +2043,499 @@ export default function AdminPanel() {
           TAB 3: PUBLISH ANNOUNCEMENTS (System Admin Only)
          ========================================== */}
       {tabIndex === 'announcements' && user?.role === 'system_admin' && (
-        <Card sx={{ maxWidth: 650, mx: 'auto' }}>
-          <CardContent sx={{ p: 4 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
-              📢 Publicar Comunicado Oficial
-            </Typography>
-            <Divider sx={{ mb: 3 }} />
+        <Stack spacing={4} sx={{ maxWidth: 650, mx: 'auto' }}>
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 3 }}>
+                📢 Publicar Comunicado Oficial
+              </Typography>
+              <Divider sx={{ mb: 3 }} />
 
-            <Box component="form" onSubmit={handleCreateAnnouncement}>
-              <Stack spacing={3}>
-                <TextField
-                  label="Título do Comunicado"
-                  variant="outlined"
-                  required
-                  fullWidth
-                  value={annTitle}
-                  onChange={(e) => setAnnTitle(e.target.value)}
-                  placeholder="Ex: Prorrogação adiciona gols ao palpite oficial!"
-                />
-                
-                <TextField
-                  label="Texto da Mensagem"
-                  variant="outlined"
-                  required
-                  fullWidth
-                  multiline
-                  rows={4}
-                  value={annBody}
-                  onChange={(e) => setAnnBody(e.target.value)}
-                  placeholder="Escreva os detalhes do aviso..."
-                />
+              <Box component="form" onSubmit={handleCreateAnnouncement}>
+                <Stack spacing={3}>
+                  <TextField
+                    label="Título do Comunicado"
+                    variant="outlined"
+                    required
+                    fullWidth
+                    value={annTitle}
+                    onChange={(e) => setAnnTitle(e.target.value)}
+                    placeholder="Ex: Prorrogação adiciona gols ao palpite oficial!"
+                  />
+                  
+                  <TextField
+                    label="Texto da Mensagem"
+                    variant="outlined"
+                    required
+                    fullWidth
+                    multiline
+                    rows={4}
+                    value={annBody}
+                    onChange={(e) => setAnnBody(e.target.value)}
+                    placeholder="Escreva os detalhes do aviso..."
+                  />
 
-                <Grid container spacing={2}>
-                  {/* Priority selector */}
-                  <Grid item xs={6}>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel>Prioridade</InputLabel>
-                      <Select value={annPriority} label="Prioridade" onChange={(e) => setAnnPriority(e.target.value)}>
-                        <MenuItem value="low">Baixa</MenuItem>
-                        <MenuItem value="medium">Média (Aviso)</MenuItem>
-                        <MenuItem value="high">Alta (Urgente)</MenuItem>
-                      </Select>
-                    </FormControl>
+                  <Grid container spacing={2}>
+                    {/* Priority selector */}
+                    <Grid item xs={6}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>Prioridade</InputLabel>
+                        <Select value={annPriority} label="Prioridade" onChange={(e) => setAnnPriority(e.target.value)}>
+                          <MenuItem value="low">Baixa</MenuItem>
+                          <MenuItem value="medium">Média (Aviso)</MenuItem>
+                          <MenuItem value="high">Alta (Urgente)</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+
+                    {/* Target Audience Selector */}
+                    <Grid item xs={6}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>Público Alvo</InputLabel>
+                        <Select value={annTarget} label="Público Alvo" onChange={(e) => setAnnTarget(e.target.value)}>
+                          <MenuItem value="global">Todos os Participantes</MenuItem>
+                          <MenuItem value="group">Grupo Específico</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
                   </Grid>
 
-                  {/* Target Audience Selector */}
-                  <Grid item xs={6}>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel>Público Alvo</InputLabel>
-                      <Select value={annTarget} label="Público Alvo" onChange={(e) => setAnnTarget(e.target.value)}>
-                        <MenuItem value="global">Todos os Participantes</MenuItem>
-                        <MenuItem value="group">Grupo Específico</MenuItem>
+                  {/* Target group select */}
+                  {annTarget === 'group' && (
+                    <FormControl size="small" fullWidth required>
+                      <InputLabel>Selecionar Grupo Alvo</InputLabel>
+                      <Select value={annTargetGroup} label="Selecionar Grupo Alvo" onChange={(e) => setAnnTargetGroup(e.target.value)}>
+                        {groups.map(g => (
+                          <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>
+                        ))}
                       </Select>
                     </FormControl>
+                  )}
+
+                  <Button type="submit" variant="contained" color="primary" size="large">
+                    Publicar Comunicado
+                  </Button>
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
+                💬 Configurar Mensagem de Cobrança
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Configure o texto que será enviado no grupo do WhatsApp ao cobrar devedores. Use os placeholders disponíveis abaixo para enriquecer a mensagem.
+              </Typography>
+              <Box component="form" onSubmit={handleSaveChargeTemplate}>
+                <Grid container spacing={4}>
+                  <Grid item xs={12} md={7}>
+                    <Stack spacing={3}>
+                      <TextField
+                        label="Modelo de Mensagem de Cobrança"
+                        variant="outlined"
+                        required
+                        fullWidth
+                        multiline
+                        rows={10}
+                        value={chargeTemplate}
+                        onChange={(e) => setChargeTemplate(e.target.value)}
+                        placeholder="Escreva a mensagem de cobrança..."
+                      />
+
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, fontFamily: 'Outfit' }}>
+                          Placeholders Disponíveis
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                          Dica: Clique em qualquer um dos placeholders abaixo para adicioná-lo ao final da sua mensagem:
+                        </Typography>
+                        <Grid container spacing={1.5}>
+                          {[
+                            { tag: '{{devedores}}', label: 'Lista de Devedores', desc: 'Nomes dos devedores separados por linha.' },
+                            { tag: '{{aprovados}}', label: 'Cadastros Aprovados', desc: 'Número total de participantes com cadastro ativo (excluindo admins).' },
+                            { tag: '{{aprovados_pagos}}', label: 'Inscrições Pagas', desc: 'Participantes ativos com pagamento aprovado (excluindo admins).' },
+                            { tag: '{{valor}}', label: 'Valor Total Aprovado', desc: 'Valor arrecadado dos participantes aprovados (ex: R$ 500,00).' },
+                            { tag: '{{total_cadastrados}}', label: 'Total Cadastrados', desc: 'Número total de participantes ativos (excluindo admins).' },
+                            { tag: '{{devedores_qtd}}', label: 'Qtd. de Devedores', desc: 'Número de devedores pendentes (excluindo admins).' },
+                            { tag: '{{taxa_inscricao}}', label: 'Taxa de Inscrição', desc: 'Valor individual da taxa de inscrição (ex: R$ 50,00).' }
+                          ].map((ph) => (
+                            <Grid item xs={12} sm={6} key={ph.tag}>
+                              <Paper
+                                variant="outlined"
+                                sx={{
+                                  p: 1.5,
+                                  cursor: 'pointer',
+                                  '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
+                                  transition: 'all 0.2s',
+                                  height: '100%',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'center'
+                                }}
+                                onClick={() => {
+                                  setChargeTemplate(prev => prev + ph.tag)
+                                }}
+                              >
+                                <Typography sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'primary.main', fontSize: '0.85rem' }}>
+                                  {ph.tag}
+                                </Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mt: 0.5 }}>
+                                  {ph.label}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: 'block', lineHeight: 1.2, mb: 1.5 }}>
+                                  {ph.desc}
+                                </Typography>
+                                <Box sx={{ mt: 'auto', pt: 1, borderTop: '1px dashed', borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
+                                    Valor atual:
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'text.primary', fontSize: '0.75rem' }}>
+                                    {ph.tag === '{{devedores}}' ? (placeholderValues.devedores_qtd ? `${placeholderValues.devedores_qtd} devedores` : 'Nenhum') :
+                                     ph.tag === '{{aprovados}}' ? (placeholderValues.aprovados ?? 0) :
+                                     ph.tag === '{{aprovados_pagos}}' ? (placeholderValues.aprovados_pagos ?? 0) :
+                                     ph.tag === '{{valor}}' ? (placeholderValues.valor || 'R$ 0,00') :
+                                     ph.tag === '{{total_cadastrados}}' ? (placeholderValues.total_cadastrados ?? 0) :
+                                     ph.tag === '{{devedores_qtd}}' ? (placeholderValues.devedores_qtd ?? 0) :
+                                     ph.tag === '{{taxa_inscricao}}' ? (placeholderValues.taxa_inscricao || 'R$ 0,00') : '-'}
+                                  </Typography>
+                                </Box>
+                              </Paper>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Box>
+
+                      <Button type="submit" variant="contained" color="secondary" size="large" disabled={savingTemplate} sx={{ alignSelf: 'flex-start' }}>
+                        {savingTemplate ? 'Salvando...' : 'Salvar Modelo de Cobrança'}
+                      </Button>
+                    </Stack>
+                  </Grid>
+
+                  <Grid item xs={12} md={5}>
+                    <Box
+                      sx={{
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 3,
+                        overflow: 'hidden',
+                        height: '100%',
+                        minHeight: 450,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        bgcolor: 'background.default'
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          bgcolor: '#075E54',
+                          color: '#fff',
+                          px: 2.5,
+                          py: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1.5
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: '50%',
+                            bgcolor: '#128C7E',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            fontSize: '1.1rem'
+                          }}
+                        >
+                          🏆
+                        </Box>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', display: 'block', lineHeight: 1.2 }}>
+                            Grupo Oficial - Bolão Copa 2026
+                          </Typography>
+                          <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', lineHeight: 1.2 }}>
+                            Mensagem Automática (WhatsApp)
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      <Box
+                        sx={{
+                          flexGrow: 1,
+                          p: 2.5,
+                          backgroundImage: 'radial-gradient(circle, #efeae2 20%, transparent 20%), radial-gradient(circle, #efeae2 20%, transparent 20%)',
+                          backgroundSize: '16px 16px',
+                          backgroundPosition: '0 0, 8px 8px',
+                          bgcolor: '#f4f1eb',
+                          overflowY: 'auto',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'flex-start'
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            bgcolor: '#d9fdd3',
+                            color: '#303030',
+                            borderRadius: '8px 8px 0px 8px',
+                            boxShadow: '0 1px 0.5px rgba(0,0,0,0.13)',
+                            p: 2,
+                            maxWidth: '90%',
+                            alignSelf: 'flex-end',
+                            position: 'relative',
+                            mb: 1,
+                            minWidth: 180
+                          }}
+                        >
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'Segoe UI, Helvetica, Arial, sans-serif',
+                              fontSize: '0.9rem',
+                              lineHeight: 1.4,
+                              wordBreak: 'break-word',
+                              pb: 1.5
+                            }}
+                          >
+                            {compilePreview(chargeTemplate) || 'Escreva o modelo de mensagem de cobrança no editor...'}
+                          </Typography>
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              bottom: 4,
+                              right: 8,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5
+                            }}
+                          >
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem', color: '#667781' }}>
+                              {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            </Typography>
+                            <Box sx={{ color: '#53bdeb', display: 'flex', fontSize: 12, fontWeight: 'bold' }}>
+                              ✔✔
+                            </Box>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
                   </Grid>
                 </Grid>
+              </Box>
+            </CardContent>
+          </Card>
 
-                {/* Target group select */}
-                {annTarget === 'group' && (
-                  <FormControl size="small" fullWidth required>
-                    <InputLabel>Selecionar Grupo Alvo</InputLabel>
-                    <Select value={annTargetGroup} label="Selecionar Grupo Alvo" onChange={(e) => setAnnTargetGroup(e.target.value)}>
-                      {groups.map(g => (
-                        <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                )}
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
+                💰 Configurar Confirmação de Pagamento
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Configure o texto que será enviado no grupo do WhatsApp ao aprovar o pagamento de um participante. Use os placeholders disponíveis abaixo para enriquecer a mensagem.
+              </Typography>
+              <Box component="form" onSubmit={handleSaveApprovalTemplate}>
+                <Grid container spacing={4}>
+                  <Grid item xs={12} md={7}>
+                    <Stack spacing={3}>
+                      <TextField
+                        label="Modelo de Confirmação de Pagamento"
+                        variant="outlined"
+                        required
+                        fullWidth
+                        multiline
+                        rows={10}
+                        value={approvalTemplate}
+                        onChange={(e) => setApprovalTemplate(e.target.value)}
+                        placeholder="Escreva a mensagem de aprovação de pagamento..."
+                      />
 
-                <Button type="submit" variant="contained" color="primary" size="large">
-                  Publicar Comunicado
-                </Button>
-              </Stack>
-            </Box>
-          </CardContent>
-        </Card>
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, fontFamily: 'Outfit' }}>
+                          Placeholders Disponíveis
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                          Dica: Clique em qualquer um dos placeholders abaixo para adicioná-lo ao final da sua mensagem:
+                        </Typography>
+                        <Grid container spacing={1.5}>
+                          {[
+                            { tag: '{{usuario}}', label: 'Nome do Participante', desc: 'Nome do participante que teve o pagamento aprovado.' },
+                            { tag: '{{prizepool}}', label: 'Tabela de Premiação', desc: 'Prêmios estimados para 1º, 2º e 3º lugares (calculados automaticamente).' },
+                            { tag: '{{valor}}', label: 'Valor Total Aprovado', desc: 'Valor arrecadado dos participantes aprovados (ex: R$ 8.250,00).' },
+                            { tag: '{{aprovados_pagos}}', label: 'Inscrições Pagas', desc: 'Participantes ativos com pagamento aprovado (excluindo admins).' },
+                            { tag: '{{taxa_inscricao}}', label: 'Taxa de Inscrição', desc: 'Valor individual da taxa de inscrição (ex: R$ 150,00).' }
+                          ].map((ph) => (
+                            <Grid item xs={12} sm={6} key={ph.tag}>
+                              <Paper
+                                variant="outlined"
+                                sx={{
+                                  p: 1.5,
+                                  cursor: 'pointer',
+                                  '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
+                                  transition: 'all 0.2s',
+                                  height: '100%',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'center'
+                                }}
+                                onClick={() => {
+                                  setApprovalTemplate(prev => prev + ph.tag)
+                                }}
+                              >
+                                <Typography sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'primary.main', fontSize: '0.85rem' }}>
+                                  {ph.tag}
+                                </Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mt: 0.5 }}>
+                                  {ph.label}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: 'block', lineHeight: 1.2, mb: 1.5 }}>
+                                  {ph.desc}
+                                </Typography>
+                                <Box sx={{ mt: 'auto', pt: 1, borderTop: '1px dashed', borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
+                                    Valor atual:
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'text.primary', fontSize: '0.75rem', whiteSpace: 'pre-wrap', textAlign: 'right' }}>
+                                    {ph.tag === '{{usuario}}' ? (approvalValues.usuario || 'Fulano de Tal') :
+                                     ph.tag === '{{prizepool}}' ? (approvalValues.prizepool || '-') :
+                                     ph.tag === '{{valor}}' ? (approvalValues.valor || 'R$ 0,00') :
+                                     ph.tag === '{{aprovados_pagos}}' ? (approvalValues.aprovados_pagos ?? 0) :
+                                     ph.tag === '{{taxa_inscricao}}' ? (approvalValues.taxa_inscricao || 'R$ 0,00') : '-'}
+                                  </Typography>
+                                </Box>
+                              </Paper>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Box>
+
+                      <Button type="submit" variant="contained" color="secondary" size="large" disabled={savingApprovalTemplate} sx={{ alignSelf: 'flex-start' }}>
+                        {savingApprovalTemplate ? 'Salvando...' : 'Salvar Modelo de Confirmação'}
+                      </Button>
+                    </Stack>
+                  </Grid>
+
+                  <Grid item xs={12} md={5}>
+                    <Box
+                      sx={{
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 3,
+                        overflow: 'hidden',
+                        height: '100%',
+                        minHeight: 450,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        bgcolor: 'background.default'
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          bgcolor: '#075E54',
+                          color: '#fff',
+                          px: 2.5,
+                          py: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1.5
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: '50%',
+                            bgcolor: '#128C7E',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            fontSize: '1.1rem'
+                          }}
+                        >
+                          🏆
+                        </Box>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', display: 'block', lineHeight: 1.2 }}>
+                            Grupo Oficial - Bolão Copa 2026
+                          </Typography>
+                          <Typography variant="caption" sx={{ opacity: 0.8, display: 'block', lineHeight: 1.2 }}>
+                            Mensagem Automática (WhatsApp)
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      <Box
+                        sx={{
+                          flexGrow: 1,
+                          p: 2.5,
+                          backgroundImage: 'radial-gradient(circle, #efeae2 20%, transparent 20%), radial-gradient(circle, #efeae2 20%, transparent 20%)',
+                          backgroundSize: '16px 16px',
+                          backgroundPosition: '0 0, 8px 8px',
+                          bgcolor: '#f4f1eb',
+                          overflowY: 'auto',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'flex-start'
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            bgcolor: '#d9fdd3',
+                            color: '#303030',
+                            borderRadius: '8px 8px 0px 8px',
+                            boxShadow: '0 1px 0.5px rgba(0,0,0,0.13)',
+                            p: 2,
+                            maxWidth: '90%',
+                            alignSelf: 'flex-end',
+                            position: 'relative',
+                            mb: 1,
+                            minWidth: 180
+                          }}
+                        >
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'Segoe UI, Helvetica, Arial, sans-serif',
+                              fontSize: '0.9rem',
+                              lineHeight: 1.4,
+                              wordBreak: 'break-word',
+                              pb: 1.5
+                            }}
+                          >
+                            {compileApprovalPreview(approvalTemplate) || 'Escreva o modelo de mensagem de aprovação de pagamento...'}
+                          </Typography>
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              bottom: 4,
+                              right: 8,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5
+                            }}
+                          >
+                            <Typography variant="caption" sx={{ fontSize: '0.65rem', color: '#667781' }}>
+                              {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            </Typography>
+                            <Box sx={{ color: '#53bdeb', display: 'flex', fontSize: 12, fontWeight: 'bold' }}>
+                              ✔✔
+                            </Box>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+            </CardContent>
+          </Card>
+        </Stack>
       )}
 
       {/* ==========================================

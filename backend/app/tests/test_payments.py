@@ -322,3 +322,147 @@ def test_payment_charge_debtors_sends_message_and_pix(client, db_session, test_u
     assert "br.gov.bcb.pix" in pix_text
     assert "\n" not in pix_text
     assert captured[1]["files"]["to"] == (None, "120363407064163865@g.us")
+
+
+def test_payment_charge_debtors_custom_template(db_session, test_users, client, monkeypatch):
+    from app.models import PixConfig
+    admin = test_users[0]
+    p1 = test_users[2]
+    p2 = test_users[3]
+    captured = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, headers, files, timeout):
+        captured.append({
+            "url": url,
+            "headers": headers,
+            "files": files,
+            "timeout": timeout
+        })
+        return FakeResponse()
+
+    monkeypatch.setenv("WHATSAPP_NOTIFY_ENABLED", "true")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_URL", "http://notify.test/internal/v1/send")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TOKEN", "secret-token")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TO", "120363407064163865@g.us")
+    monkeypatch.setattr("app.notifications.requests.post", fake_post)
+
+    config = db_session.query(PixConfig).filter(PixConfig.id == 1).first()
+    config.pix_key = "pix@bolao.test"
+    config.merchant_name = "BOLAO SERPRO"
+    config.merchant_city = "BRASILIA"
+    config.entry_fee = 50.00
+
+    p1.payment_status = "pending"
+    p1.display_name = "Ana"
+    p2.payment_status = "rejected"
+    p2.display_name = "Bruno"
+    db_session.commit()
+
+    admin_headers = get_auth_headers(client, admin.username)
+
+    # 1. Test GET returns default template and placeholder stats
+    get_res = client.get("/api/payments/admin/charge-template", headers=admin_headers)
+    assert get_res.status_code == 200
+    data = get_res.json()
+    assert "{{devedores}}" in data["template"]
+    assert data["values"]["aprovados"] == 2
+    assert data["values"]["aprovados_pagos"] == 0
+    assert data["values"]["devedores_qtd"] == 2
+    assert data["values"]["total_cadastrados"] == 2
+    assert data["values"]["taxa_inscricao"] == "R$ 50,00"
+    assert data["values"]["valor"] == "R$ 0,00"
+
+    # 2. Test PUT updates the template with all new placeholders
+    custom_tpl = (
+        "Aprovados: {{aprovados}}, Total: {{total_cadastrados}}, Devedores: {{devedores}} ({{devedores_qtd}}), "
+        "Taxa: {{taxa_inscricao}}, Valor Total: {{valor}}, Pagos: {{aprovados_pagos}}"
+    )
+    put_res = client.put(
+        "/api/payments/admin/charge-template",
+        json={"template": custom_tpl},
+        headers=admin_headers
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["template"] == custom_tpl
+
+    # 3. Test POST charge-debtors uses custom template and translates all placeholders correctly
+    res = client.post("/api/payments/admin/charge-debtors", headers=admin_headers)
+    assert res.status_code == 200
+    assert res.json()["debtors_count"] == 2
+    assert len(captured) == 2
+
+    charge_text = captured[0]["files"]["text"][1]
+    assert "Aprovados: 2" in charge_text
+    assert "Total: 2" in charge_text
+    assert "Devedores: Ana\nBruno (2)" in charge_text
+    assert "Taxa: R$ 50,00" in charge_text
+    assert "Valor Total: R$ 0,00" in charge_text
+    assert "Pagos: 0" in charge_text
+
+
+def test_payment_approval_custom_template(client, db_session, test_users, monkeypatch):
+    admin = test_users[0]
+    p1 = test_users[2]
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, headers, files, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["files"] = files
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("WHATSAPP_NOTIFY_ENABLED", "true")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_URL", "http://notify.test/internal/v1/send")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TOKEN", "secret-token")
+    monkeypatch.setenv("WHATSAPP_NOTIFY_TO", "120363407064163865@g.us")
+    monkeypatch.setattr("app.notifications.requests.post", fake_post)
+
+    config = db_session.query(PixConfig).filter(PixConfig.id == 1).first()
+    config.entry_fee = 100
+    p1.payment_status = "submitted"
+    p1.display_name = "Ana Teste"
+    db_session.commit()
+
+    admin_headers = get_auth_headers(client, admin.username)
+
+    # 1. Test GET returns default template and stats
+    get_res = client.get("/api/payments/admin/approval-template", headers=admin_headers)
+    assert get_res.status_code == 200
+    data = get_res.json()
+    assert "{{prizepool}}" in data["template"]
+    assert data["values"]["usuario"] == "Fulano de Tal"
+    assert data["values"]["taxa_inscricao"] == "R$ 100,00"
+
+    # 2. Test PUT updates the template
+    custom_tpl = (
+        "Olá {{usuario}}! Seu pagamento foi aprovado. O total acumulado é {{valor}} (Taxa: {{taxa_inscricao}}). "
+        "Estatísticas de pagos: {{aprovados_pagos}}. Premiação:\n{{prizepool}}"
+    )
+    put_res = client.put(
+        "/api/payments/admin/approval-template",
+        json={"template": custom_tpl},
+        headers=admin_headers
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["template"] == custom_tpl
+
+    # 3. Test POST approve uses custom template
+    res = client.post(f"/api/payments/admin/approve/{p1.id}", headers=admin_headers)
+    assert res.status_code == 200
+
+    msg = captured["files"]["text"][1]
+    assert "Olá Ana Teste!" in msg
+    assert "Seu pagamento foi aprovado" in msg
+    assert "O total acumulado é R$ 200,00" in msg
+    assert "Estatísticas de pagos: 2" in msg
+    assert "🥇 1º lugar: R$ 100,00" in msg
+
