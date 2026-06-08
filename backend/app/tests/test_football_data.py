@@ -151,6 +151,32 @@ def test_football_data_waits_when_one_same_kickoff_match_is_not_finished(db_sess
     assert any("Nenhum placar foi aplicado" in event["message"] for event in log.details["events"])
 
 
+def test_scheduled_football_data_sync_without_candidates_does_not_create_log(db_session, monkeypatch):
+    monkeypatch.setenv("FOOTBALL_DATA_API", "fake-token")
+    monkeypatch.setenv("FOOTBALL_DATA_ENABLED", "true")
+
+    result = sync_finished_scores_from_football_data(db_session, trigger="scheduled")
+
+    assert result["checked_groups"] == 0
+    assert result["updated_groups"] == 0
+    assert result["updated_matches"] == 0
+    assert db_session.query(FootballDataSyncLog).count() == 0
+
+
+def test_manual_football_data_sync_without_candidates_keeps_visibility_log(db_session, monkeypatch):
+    monkeypatch.setenv("FOOTBALL_DATA_API", "fake-token")
+    monkeypatch.setenv("FOOTBALL_DATA_ENABLED", "true")
+
+    result = sync_finished_scores_from_football_data(db_session, trigger="manual")
+
+    assert result["checked_groups"] == 0
+    log = db_session.query(FootballDataSyncLog).order_by(FootballDataSyncLog.started_at.desc()).first()
+    assert log is not None
+    assert log.status == "success"
+    assert log.details["candidate_kickoffs"] == []
+    assert any("0 horário(s) candidato(s)" in event["message"] for event in log.details["events"])
+
+
 def test_sync_fixtures_from_football_data(db_session, monkeypatch):
     from app.football_data import sync_fixtures_from_football_data
     monkeypatch.setenv("FOOTBALL_DATA_API", "fake-token")
@@ -294,4 +320,3 @@ def test_get_knockout_setup_possible_teams(db_session, test_users, client):
     assert len(match_data["possible_teams1"]) == 4
     assert len(match_data["possible_teams2"]) == 4
     assert match_data["possible_teams1"][0]["name"] in {"Brasil", "França", "Itália", "Espanha"}
-

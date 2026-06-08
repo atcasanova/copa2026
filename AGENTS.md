@@ -46,7 +46,9 @@ Regras que nao devem ser relaxadas sem decisao explicita:
 
 Logs da sincronizacao:
 
-- Cada execucao deve criar um registro em `football_data_sync_logs` via `FootballDataSyncLog`.
+- Cada execucao manual deve criar um registro em `football_data_sync_logs` via `FootballDataSyncLog`.
+- Execucoes agendadas sem horarios candidatos (partidas pendentes a partir de 2h apos kickoff) nao devem criar log para evitar armazenamento a cada minuto sem jogos a consultar.
+- Execucoes agendadas com horarios candidatos devem criar log, mesmo quando nenhum placar for aplicado.
 - O endpoint admin de leitura e `GET /api/admin/football-data/logs`.
 - Logs devem registrar, no minimo: trigger (`manual` ou `scheduled`), status, horarios candidatos, chamadas feitas, quantidade de partidas retornadas, checagens por partida, placares aplicados e erros.
 - A aba admin de Sincronizacao faz polling desses logs enquanto aberta. Nao remova sem substituir por visibilidade equivalente.

@@ -276,35 +276,38 @@ def sync_finished_scores_from_football_data(
     now_utc: datetime | None = None,
     trigger: str = "manual",
 ) -> dict:
-    details = {
-        "events": [],
-        "candidate_kickoffs": [],
-        "requests_made": 0,
-    }
-    _append_event(details["events"], "info", "Iniciando consulta ao football-data.org.", trigger=trigger)
-    sync_log = _create_sync_log(db, trigger, details)
-
-    if not football_data_enabled():
-        result = {"enabled": False, "checked_groups": 0, "updated_groups": 0, "updated_matches": 0, "errors": []}
-        _append_event(details["events"], "warning", "Sincronização football-data.org desabilitada por configuração.")
-        _update_sync_log(db, sync_log.id, result, details, status="skipped", finished=True)
-        return result
-    if not get_api_token():
-        result = {"enabled": True, "checked_groups": 0, "updated_groups": 0, "updated_matches": 0, "errors": ["FOOTBALL_DATA_API não configurado."]}
-        _append_event(details["events"], "error", "FOOTBALL_DATA_API não configurado.")
-        _update_sync_log(db, sync_log.id, result, details, status="error", finished=True)
-        return result
-
     now_utc = now_utc or datetime.utcnow()
     kickoff_times = _candidate_kickoff_times(db, now_utc)
-    result = {"enabled": True, "checked_groups": 0, "updated_groups": 0, "updated_matches": 0, "errors": []}
-    details["candidate_kickoffs"] = [kickoff_time.isoformat() for kickoff_time in kickoff_times]
+    enabled = football_data_enabled()
+    result = {"enabled": enabled, "checked_groups": 0, "updated_groups": 0, "updated_matches": 0, "errors": []}
+    details = {
+        "events": [],
+        "candidate_kickoffs": [kickoff_time.isoformat() for kickoff_time in kickoff_times],
+        "requests_made": 0,
+    }
+
+    if trigger == "scheduled" and not kickoff_times:
+        return result
+
+    _append_event(details["events"], "info", "Iniciando consulta ao football-data.org.", trigger=trigger)
     _append_event(
         details["events"],
         "info",
         f"{len(kickoff_times)} horário(s) candidato(s) encontrado(s) para consulta.",
         candidate_kickoffs=details["candidate_kickoffs"],
     )
+    sync_log = _create_sync_log(db, trigger, details)
+
+    if not enabled:
+        _append_event(details["events"], "warning", "Sincronização football-data.org desabilitada por configuração.")
+        _update_sync_log(db, sync_log.id, result, details, status="skipped", finished=True)
+        return result
+    if not get_api_token():
+        result["errors"].append("FOOTBALL_DATA_API não configurado.")
+        _append_event(details["events"], "error", "FOOTBALL_DATA_API não configurado.")
+        _update_sync_log(db, sync_log.id, result, details, status="error", finished=True)
+        return result
+
     _update_sync_log(db, sync_log.id, result, details)
 
     response_cache: dict[tuple[str, str], tuple[list[dict], dict]] = {}
