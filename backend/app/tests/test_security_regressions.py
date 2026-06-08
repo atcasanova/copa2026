@@ -279,8 +279,17 @@ def test_admin_can_change_prediction_lock_hours(client, db_session, test_users):
 def test_match_prediction_visibility_hides_scores_before_lock(client, db_session, test_users):
     viewer = test_users[2]
     participant = test_users[3]
+    pending = User(
+        username="pending_visibility_user",
+        email="pending_visibility@test.com",
+        display_name="Pendente Visibilidade",
+        hashed_password=get_password_hash("password"),
+        role="participant",
+        payment_status="submitted",
+    )
 
     db_session.add_all([
+        pending,
         Team(name="Brasil", group_name="A"),
         Team(name="Canada", group_name="A"),
         Stadium(name="Visibility Stadium", city="City", timezone="UTC")
@@ -300,7 +309,10 @@ def test_match_prediction_visibility_hides_scores_before_lock(client, db_session
     )
     db_session.add(match)
     db_session.commit()
-    db_session.add(Prediction(match_id=match.id, user_id=participant.id, goals_team1=2, goals_team2=1))
+    db_session.add_all([
+        Prediction(match_id=match.id, user_id=participant.id, goals_team1=2, goals_team2=1),
+        Prediction(match_id=match.id, user_id=pending.id, goals_team1=1, goals_team2=0),
+    ])
     db_session.commit()
 
     headers = login_headers(client, viewer.username)
@@ -313,6 +325,7 @@ def test_match_prediction_visibility_hides_scores_before_lock(client, db_session
     assert data["points_summary"] == []
     assert data["total_predictions"] == 1
     assert data["total_participants"] == 2
+    assert all(entry["display_name"] != pending.display_name for entry in data["entries"])
     assert data["entries"][0]["display_name"] == participant.display_name
     assert data["entries"][0]["created_at"].endswith(("+00:00", "Z"))
     assert data["entries"][0]["goals_team1"] is None

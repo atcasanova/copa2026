@@ -13,6 +13,7 @@ from ..models import User, PixConfig, AuditLog, SystemSetting
 from ..schemas import PixConfigResponse, PixConfigUpdate, UserResponse
 from ..auth import get_current_active_user
 from ..notifications import send_payment_approval_notification, send_whatsapp_message
+from ..scoring import invalidate_ranking_cache
 from .utils import user_name_sort_key
 
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
@@ -712,6 +713,7 @@ def admin_approve_payment(
     
     db.commit()
     db.refresh(user)
+    invalidate_ranking_cache(db)
     
     audit = AuditLog(
         user_id=current_user.id,
@@ -761,6 +763,7 @@ def admin_revert_payment_approval(
 
     db.commit()
     db.refresh(user)
+    invalidate_ranking_cache(db)
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -803,6 +806,7 @@ def admin_reject_payment(
     
     db.commit()
     db.refresh(user)
+    invalidate_ranking_cache(db)
     
     audit = AuditLog(
         user_id=current_user.id,

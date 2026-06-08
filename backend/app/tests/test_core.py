@@ -1,7 +1,8 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from app.models import Team, Stadium, Match, Prediction, Group, GroupMember, GroupInvitation, StageMultiplier, SyncMatchDiff
+from app.auth import get_password_hash
+from app.models import Team, Stadium, Match, Prediction, Group, GroupMember, GroupInvitation, StageMultiplier, SyncMatchDiff, User
 from app.scoring import (
     calculate_base_points, score_prediction, get_rankings, invalidate_ranking_cache,
     capture_ranking_update_snapshot
@@ -386,6 +387,51 @@ def test_ranking_ignores_incomplete_same_kickoff_group(db_session, test_users):
     ana_rank = next(row for row in get_rankings(db_session) if row["user_id"] == ana.id)
     assert ana_rank["total_points"] == 10
     assert ana_rank["missing_predictions_count"] == 1
+
+
+def test_ranking_only_includes_approved_participants(db_session, test_users):
+    ana = test_users[2]
+    pending = User(
+        username="pending_rank_user",
+        email="pending_rank@test.com",
+        display_name="Pendente Ranking",
+        hashed_password=get_password_hash("password"),
+        role="participant",
+        payment_status="submitted",
+    )
+    db_session.add_all([
+        pending,
+        Team(name="Noruega", group_name="A"),
+        Team(name="Suecia", group_name="A"),
+        Stadium(name="Approved Ranking Stadium", city="City", timezone="UTC"),
+    ])
+    db_session.commit()
+
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-13",
+        time_str="15:00 UTC+0",
+        kickoff_time=datetime.utcnow() - timedelta(hours=3),
+        team1_name="Noruega",
+        team2_name="Suecia",
+        ground="Approved Ranking Stadium",
+        score_ft_team1=1,
+        score_ft_team2=0,
+        status="score_confirmed"
+    )
+    db_session.add(match)
+    db_session.commit()
+    db_session.add_all([
+        Prediction(match_id=match.id, user_id=ana.id, goals_team1=1, goals_team2=0, points_earned=10, base_points=10),
+        Prediction(match_id=match.id, user_id=pending.id, goals_team1=1, goals_team2=0, points_earned=10, base_points=10),
+    ])
+    db_session.commit()
+
+    ranking = get_rankings(db_session)
+
+    assert any(row["user_id"] == ana.id for row in ranking)
+    assert all(row["user_id"] != pending.id for row in ranking)
 
 
 def test_ranking_position_change_uses_last_published_ranking(db_session, test_users):

@@ -347,12 +347,14 @@ def get_match_prediction_visibility(
     is_scored = match.score_ft_team1 is not None and match.score_ft_team2 is not None
     total_participants = db.query(User).filter(
         User.is_active == True,
-        User.role.notin_(["system_admin", "score_admin"])
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status == "approved"
     ).count()
     predictions = db.query(Prediction).join(User, User.id == Prediction.user_id).filter(
         Prediction.match_id == match_id,
         User.is_active == True,
-        User.role.notin_(["system_admin", "score_admin"])
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status == "approved"
     ).all()
     predictions.sort(
         key=lambda pred: (

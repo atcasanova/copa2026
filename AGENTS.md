@@ -109,7 +109,7 @@ Situacoes em que mensagens sao enviadas ao grupo:
   - Envia 2h30 antes do kickoff (`REMINDER_LEAD_MINUTES = 150`) dentro de janela de 5 minutos.
   - Envia no maximo uma vez por kickoff usando `SystemSetting` com chave `whatsapp_reminder_sent:<kickoff_iso>`.
   - Mensagem lista todos os jogos daquele horario e inclui `Nao palpitaram: N` por jogo.
-  - A contagem considera usuarios ativos que nao sao `system_admin` nem `score_admin`.
+  - A contagem considera usuarios ativos, aprovados em pagamento, que nao sao `system_admin` nem `score_admin`.
 - Ranking atualizado:
   - `send_general_ranking_notification()`.
   - Enviar somente quando a regra de ranking por kickoff completo permitir publicacao.
@@ -141,8 +141,8 @@ Arquivos principais: `backend/app/routers/predictions.py`, `frontend/src/pages/P
 
 - Datas vindas da API sem timezone devem ser tratadas como UTC no frontend antes de exibir/comparar.
 - A lista "Participantes que ja palpitaram" deve mostrar titulo no formato `Participantes que ja palpitaram (x/y)`.
-- `x` = usuarios ativos nao admin que palpitaram naquele jogo.
-- `y` = total de usuarios ativos nao admin.
+- `x` = usuarios ativos nao admin com pagamento aprovado que palpitaram naquele jogo.
+- `y` = total de usuarios ativos nao admin com pagamento aprovado.
 - A funcionalidade antiga de importar palpites via JSON foi removida e nao deve ser reintroduzida sem decisao explicita.
 
 ## Admin e Sincronizacao Legada

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
-from app.models import Match, Prediction, Stadium, SystemSetting, Team
+from app.auth import get_password_hash
+from app.models import Match, Prediction, Stadium, SystemSetting, Team, User
 from app.notifications import format_ranking_message, send_due_prediction_reminders
 
 
@@ -99,6 +100,15 @@ def test_prediction_reminder_is_sent_once_per_kickoff(client, db_session, test_u
     captured = _capture_whatsapp(monkeypatch)
     match = _add_match(db_session, datetime.utcnow() + timedelta(minutes=151))
     participant = test_users[2]
+    pending = User(
+        username="pending_reminder_user",
+        email="pending_reminder@test.com",
+        display_name="Pendente Lembrete",
+        hashed_password=get_password_hash("password"),
+        role="participant",
+        payment_status="submitted",
+    )
+    db_session.add(pending)
     db_session.add(Prediction(
         match_id=match.id,
         user_id=participant.id,

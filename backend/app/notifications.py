@@ -165,7 +165,8 @@ def format_matches_reminder_message(
 def _participant_query(db: Session):
     return db.query(User).filter(
         User.is_active == True,
-        User.role.notin_(["system_admin", "score_admin"])
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status == "approved"
     )
 
 
@@ -176,7 +177,8 @@ def _missing_prediction_counts(db: Session, matches: list[Match]) -> dict[int, i
         predicted_count = db.query(Prediction.user_id).join(User, User.id == Prediction.user_id).filter(
             Prediction.match_id == match.id,
             User.is_active == True,
-            User.role.notin_(["system_admin", "score_admin"])
+            User.role.notin_(["system_admin", "score_admin"]),
+            User.payment_status == "approved"
         ).distinct().count()
         counts[match.id] = max(0, total_participants - predicted_count)
     return counts

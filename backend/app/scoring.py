@@ -332,7 +332,8 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
     # 2. Base query for users
     users_query = db.query(User).filter(
         User.is_active == True,
-        User.role.notin_(["system_admin", "score_admin"])
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status == "approved"
     )
     if group_id:
         from .models import GroupMember
