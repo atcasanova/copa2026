@@ -65,9 +65,12 @@ def test_admin_payment_list_is_sorted_ignoring_case_and_accents(client, db_sessi
     ]
     assert sorted_names == ["alberto", "Álvaro", "bruno", "Cézar"]
 
-def test_proof_upload_validation(client, db_session, test_users):
+def test_proof_upload_validation(client, db_session, test_users, monkeypatch):
     admin = test_users[0]
     p1 = test_users[2]
+    
+    # Mock payment proof email notification to prevent real SMTP connections
+    monkeypatch.setattr("app.routers.payments.send_payment_proof_email", lambda *args, **kwargs: True)
     
     # Explicitly set p1 to pending to test the upload flow
     p1.payment_status = "pending"
@@ -259,9 +262,9 @@ def test_payment_approval_sends_notification(client, db_session, test_users, mon
     message = captured["files"]["text"][1]
     assert "\U0001f4b0 Pagamento de Ana Teste foi aprovado!" in message
     assert "total na poupança do Gliva: *R$ 200,00*" in message
-    assert "\U0001f947 1º lugar: R$ 100,00" in message
-    assert "\U0001f948 2º lugar: R$ 60,00" in message
-    assert "\U0001f949 3º lugar: R$ 40,00" in message
+    assert "\U0001f947 1º lugar (50%): R$ 100,00" in message
+    assert "\U0001f948 2º lugar (30%): R$ 60,00" in message
+    assert "\U0001f949 3º lugar (20%): R$ 40,00" in message
     assert captured["files"]["sendAs"] == (None, "text")
     assert captured["timeout"] == 5.0
 
@@ -464,5 +467,75 @@ def test_payment_approval_custom_template(client, db_session, test_users, monkey
     assert "Seu pagamento foi aprovado" in msg
     assert "O total acumulado é R$ 200,00" in msg
     assert "Estatísticas de pagos: 2" in msg
-    assert "🥇 1º lugar: R$ 100,00" in msg
+    assert "🥇 1º lugar (50%): R$ 100,00" in msg
+
+
+def test_send_payment_proof_email(db_session, test_users, monkeypatch):
+    from app.routers.payments import send_payment_proof_email
+    
+    # Setup test recipient config
+    monkeypatch.setenv("ADMIN_REGISTRATION_NOTIFY_TO", "admin1@test.com, admin2@test.com")
+    
+    sent_emails = []
+    
+    class MockSMTP:
+        def __init__(self, host, port, timeout=None):
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+            
+        def __enter__(self):
+            return self
+            
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+            
+        def sendmail(self, from_addr, to_addrs, msg_str):
+            sent_emails.append({
+                "from": from_addr,
+                "to": to_addrs,
+                "msg": msg_str
+            })
+            
+    monkeypatch.setattr("smtplib.SMTP", MockSMTP)
+    
+    user = test_users[2]
+    proof_content = b"fake-pdf-content"
+    filename = "comprovante.pdf"
+    content_type = "application/pdf"
+    pix_key = "123456789"
+    
+    success = send_payment_proof_email(
+        user=user,
+        file_content=proof_content,
+        filename=filename,
+        content_type=content_type,
+        pix_key=pix_key,
+        db=db_session
+    )
+    
+    assert success is True
+    assert len(sent_emails) == 1
+    sent = sent_emails[0]
+    
+    assert sent["from"] == "bolao2026@bru.to"
+    assert sent["to"] == ["admin1@test.com", "admin2@test.com"]
+    
+    import email
+    msg_obj = email.message_from_string(sent["msg"])
+    assert msg_obj["Subject"] == f"Novo comprovante de pagamento - {user.display_name}"
+    
+    body_text = ""
+    attachments = []
+    for part in msg_obj.walk():
+        c_type = part.get_content_type()
+        c_disp = part.get("Content-Disposition", "")
+        if c_type == "text/plain":
+            body_text += part.get_payload(decode=True).decode("utf-8")
+        elif "attachment" in c_disp:
+            attachments.append(part.get_filename())
+            
+    assert "/admin?tab=payments" in body_text
+    assert filename in attachments
+
 

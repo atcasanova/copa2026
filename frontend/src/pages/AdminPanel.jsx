@@ -138,6 +138,7 @@ export default function AdminPanel() {
   const [pixName, setPixName] = useState('')
   const [pixCity, setPixCity] = useState('')
   const [pixEntryFee, setPixEntryFee] = useState('')
+  const [prizepoolWinners, setPrizepoolWinners] = useState(3)
   const [paymentUsers, setPaymentUsers] = useState([])
   const [hideApprovedPayments, setHideApprovedPayments] = useState(true)
   const [chargingDebtors, setChargingDebtors] = useState(false)
@@ -343,6 +344,7 @@ export default function AdminPanel() {
         setPixName(pixConfigRes.data.merchant_name || '')
         setPixCity(pixConfigRes.data.merchant_city || '')
         setPixEntryFee(pixConfigRes.data.entry_fee || '')
+        setPrizepoolWinners(pixConfigRes.data.prizepool_winners ?? 3)
 
         // Load payments list
         const paymentsRes = await axios.get('/api/payments/admin/list')
@@ -694,10 +696,12 @@ export default function AdminPanel() {
   const compilePreview = (tmpl) => {
     if (!tmpl) return ''
     return tmpl
+      .split('{{usuario}}').join(placeholderValues.usuario || 'Fulano de Tal')
       .split('{{devedores}}').join(placeholderValues.devedores || '')
       .split('{{aprovados}}').join(String(placeholderValues.aprovados ?? 0))
       .split('{{aprovados_pagos}}').join(String(placeholderValues.aprovados_pagos ?? 0))
       .split('{{valor}}').join(placeholderValues.valor || 'R$ 0,00')
+      .split('{{prizepool}}').join(placeholderValues.prizepool || '')
       .split('{{total_cadastrados}}').join(String(placeholderValues.total_cadastrados ?? 0))
       .split('{{devedores_qtd}}').join(String(placeholderValues.devedores_qtd ?? 0))
       .split('{{taxa_inscricao}}').join(placeholderValues.taxa_inscricao || 'R$ 0,00')
@@ -732,9 +736,13 @@ export default function AdminPanel() {
     if (!tmpl) return ''
     return tmpl
       .split('{{usuario}}').join(approvalValues.usuario || 'Fulano de Tal')
+      .split('{{devedores}}').join(approvalValues.devedores || '')
+      .split('{{aprovados}}').join(String(approvalValues.aprovados ?? 0))
+      .split('{{aprovados_pagos}}').join(String(approvalValues.aprovados_pagos ?? 0))
       .split('{{valor}}').join(approvalValues.valor || 'R$ 0,00')
       .split('{{prizepool}}').join(approvalValues.prizepool || '')
-      .split('{{aprovados_pagos}}').join(String(approvalValues.aprovados_pagos ?? 0))
+      .split('{{total_cadastrados}}').join(String(approvalValues.total_cadastrados ?? 0))
+      .split('{{devedores_qtd}}').join(String(approvalValues.devedores_qtd ?? 0))
       .split('{{taxa_inscricao}}').join(approvalValues.taxa_inscricao || 'R$ 0,00')
   }
 
@@ -936,7 +944,8 @@ export default function AdminPanel() {
         pix_key: pixKey,
         merchant_name: pixName,
         merchant_city: pixCity,
-        entry_fee: parseFloat(pixEntryFee) || 0.0
+        entry_fee: parseFloat(pixEntryFee) || 0.0,
+        prizepool_winners: parseInt(prizepoolWinners) || 3
       })
       showSuccess('Configuração do Pix salva com sucesso!')
       loadInitialData()
@@ -2154,10 +2163,12 @@ export default function AdminPanel() {
                         </Typography>
                         <Grid container spacing={1.5}>
                           {[
+                            { tag: '{{usuario}}', label: 'Nome do Participante', desc: 'Nome do participante (ex: Fulano de Tal).' },
                             { tag: '{{devedores}}', label: 'Lista de Devedores', desc: 'Nomes dos devedores separados por linha.' },
                             { tag: '{{aprovados}}', label: 'Cadastros Aprovados', desc: 'Número total de participantes com cadastro ativo (excluindo admins).' },
                             { tag: '{{aprovados_pagos}}', label: 'Inscrições Pagas', desc: 'Participantes ativos com pagamento aprovado (excluindo admins).' },
                             { tag: '{{valor}}', label: 'Valor Total Aprovado', desc: 'Valor arrecadado dos participantes aprovados (ex: R$ 500,00).' },
+                            { tag: '{{prizepool}}', label: 'Tabela de Premiação', desc: 'Prêmios estimados para os primeiros colocados (calculados automaticamente).' },
                             { tag: '{{total_cadastrados}}', label: 'Total Cadastrados', desc: 'Número total de participantes ativos (excluindo admins).' },
                             { tag: '{{devedores_qtd}}', label: 'Qtd. de Devedores', desc: 'Número de devedores pendentes (excluindo admins).' },
                             { tag: '{{taxa_inscricao}}', label: 'Taxa de Inscrição', desc: 'Valor individual da taxa de inscrição (ex: R$ 50,00).' }
@@ -2192,11 +2203,13 @@ export default function AdminPanel() {
                                   <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: '0.75rem' }}>
                                     Valor atual:
                                   </Typography>
-                                  <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'text.primary', fontSize: '0.75rem' }}>
-                                    {ph.tag === '{{devedores}}' ? (placeholderValues.devedores_qtd ? `${placeholderValues.devedores_qtd} devedores` : 'Nenhum') :
+                                  <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'text.primary', fontSize: '0.75rem', whiteSpace: 'pre-wrap', textAlign: 'right' }}>
+                                    {ph.tag === '{{usuario}}' ? (placeholderValues.usuario || 'Fulano de Tal') :
+                                     ph.tag === '{{devedores}}' ? (placeholderValues.devedores_qtd ? `${placeholderValues.devedores_qtd} devedores` : 'Nenhum') :
                                      ph.tag === '{{aprovados}}' ? (placeholderValues.aprovados ?? 0) :
                                      ph.tag === '{{aprovados_pagos}}' ? (placeholderValues.aprovados_pagos ?? 0) :
                                      ph.tag === '{{valor}}' ? (placeholderValues.valor || 'R$ 0,00') :
+                                     ph.tag === '{{prizepool}}' ? (placeholderValues.prizepool || '-') :
                                      ph.tag === '{{total_cadastrados}}' ? (placeholderValues.total_cadastrados ?? 0) :
                                      ph.tag === '{{devedores_qtd}}' ? (placeholderValues.devedores_qtd ?? 0) :
                                      ph.tag === '{{taxa_inscricao}}' ? (placeholderValues.taxa_inscricao || 'R$ 0,00') : '-'}
@@ -2364,11 +2377,15 @@ export default function AdminPanel() {
                         </Typography>
                         <Grid container spacing={1.5}>
                           {[
-                            { tag: '{{usuario}}', label: 'Nome do Participante', desc: 'Nome do participante que teve o pagamento aprovado.' },
-                            { tag: '{{prizepool}}', label: 'Tabela de Premiação', desc: 'Prêmios estimados para 1º, 2º e 3º lugares (calculados automaticamente).' },
-                            { tag: '{{valor}}', label: 'Valor Total Aprovado', desc: 'Valor arrecadado dos participantes aprovados (ex: R$ 8.250,00).' },
+                            { tag: '{{usuario}}', label: 'Nome do Participante', desc: 'Nome do participante (ex: Fulano de Tal).' },
+                            { tag: '{{devedores}}', label: 'Lista de Devedores', desc: 'Nomes dos devedores separados por linha.' },
+                            { tag: '{{aprovados}}', label: 'Cadastros Aprovados', desc: 'Número total de participantes com cadastro ativo (excluindo admins).' },
                             { tag: '{{aprovados_pagos}}', label: 'Inscrições Pagas', desc: 'Participantes ativos com pagamento aprovado (excluindo admins).' },
-                            { tag: '{{taxa_inscricao}}', label: 'Taxa de Inscrição', desc: 'Valor individual da taxa de inscrição (ex: R$ 150,00).' }
+                            { tag: '{{valor}}', label: 'Valor Total Aprovado', desc: 'Valor arrecadado dos participantes aprovados (ex: R$ 500,00).' },
+                            { tag: '{{prizepool}}', label: 'Tabela de Premiação', desc: 'Prêmios estimados para os primeiros colocados (calculados automaticamente).' },
+                            { tag: '{{total_cadastrados}}', label: 'Total Cadastrados', desc: 'Número total de participantes ativos (excluindo admins).' },
+                            { tag: '{{devedores_qtd}}', label: 'Qtd. de Devedores', desc: 'Número de devedores pendentes (excluindo admins).' },
+                            { tag: '{{taxa_inscricao}}', label: 'Taxa de Inscrição', desc: 'Valor individual da taxa de inscrição (ex: R$ 50,00).' }
                           ].map((ph) => (
                             <Grid item xs={12} sm={6} key={ph.tag}>
                               <Paper
@@ -2402,9 +2419,13 @@ export default function AdminPanel() {
                                   </Typography>
                                   <Typography variant="caption" sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: 'text.primary', fontSize: '0.75rem', whiteSpace: 'pre-wrap', textAlign: 'right' }}>
                                     {ph.tag === '{{usuario}}' ? (approvalValues.usuario || 'Fulano de Tal') :
-                                     ph.tag === '{{prizepool}}' ? (approvalValues.prizepool || '-') :
-                                     ph.tag === '{{valor}}' ? (approvalValues.valor || 'R$ 0,00') :
+                                     ph.tag === '{{devedores}}' ? (approvalValues.devedores_qtd ? `${approvalValues.devedores_qtd} devedores` : 'Nenhum') :
+                                     ph.tag === '{{aprovados}}' ? (approvalValues.aprovados ?? 0) :
                                      ph.tag === '{{aprovados_pagos}}' ? (approvalValues.aprovados_pagos ?? 0) :
+                                     ph.tag === '{{valor}}' ? (approvalValues.valor || 'R$ 0,00') :
+                                     ph.tag === '{{prizepool}}' ? (approvalValues.prizepool || '-') :
+                                     ph.tag === '{{total_cadastrados}}' ? (approvalValues.total_cadastrados ?? 0) :
+                                     ph.tag === '{{devedores_qtd}}' ? (approvalValues.devedores_qtd ?? 0) :
                                      ph.tag === '{{taxa_inscricao}}' ? (approvalValues.taxa_inscricao || 'R$ 0,00') : '-'}
                                   </Typography>
                                 </Box>
@@ -2792,6 +2813,19 @@ export default function AdminPanel() {
                         onChange={(e) => setPixEntryFee(e.target.value)}
                         placeholder="Ex: 50.00"
                       />
+                      <FormControl fullWidth variant="outlined" required>
+                        <InputLabel id="prizepool-winners-label">Quantidade de Premiados</InputLabel>
+                        <Select
+                          labelId="prizepool-winners-label"
+                          value={prizepoolWinners}
+                          onChange={(e) => setPrizepoolWinners(e.target.value)}
+                          label="Quantidade de Premiados"
+                        >
+                          <MenuItem value={3}>3 Premiados (Top 3)</MenuItem>
+                          <MenuItem value={5}>5 Premiados (Top 5)</MenuItem>
+                          <MenuItem value={7}>7 Premiados (Top 7)</MenuItem>
+                        </Select>
+                      </FormControl>
                       <Button
                         type="submit"
                         variant="contained"

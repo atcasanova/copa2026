@@ -206,24 +206,49 @@ export default function Rules() {
                     </Typography>
 
                     <Stack spacing={1}>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 1, bgcolor: 'rgba(234, 179, 8, 0.05)', borderRadius: 2, borderLeft: '3px solid #eab308' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>🥇 1º Colocado (50%)</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#eab308' }}>
-                          R$ {summary.prizes.first_place.toFixed(2)}
-                        </Typography>
-                      </Box>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 1, bgcolor: 'rgba(156, 163, 175, 0.05)', borderRadius: 2, borderLeft: '3px solid #9ca3af' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>🥈 2º Colocado (30%)</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#9ca3af' }}>
-                          R$ {summary.prizes.second_place.toFixed(2)}
-                        </Typography>
-                      </Box>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 1, bgcolor: 'rgba(205, 127, 50, 0.05)', borderRadius: 2, borderLeft: '3px solid #cd7f32' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>🥉 3º Colocado (20%)</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#cd7f32' }}>
-                          R$ {summary.prizes.third_place.toFixed(2)}
-                        </Typography>
-                      </Box>
+                      {summary.prize_list ? (
+                        summary.prize_list.map((prize, idx) => (
+                          <Box 
+                            key={idx} 
+                            display="flex" 
+                            justifyContent="space-between" 
+                            alignItems="center" 
+                            sx={{ 
+                              p: 1, 
+                              bgcolor: 'rgba(255, 255, 255, 0.02)', 
+                              borderRadius: 2, 
+                              borderLeft: '3px solid',
+                              borderColor: prize.position === 1 ? '#eab308' : prize.position === 2 ? '#9ca3af' : prize.position === 3 ? '#cd7f32' : 'divider'
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>{prize.label}</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: prize.position === 1 ? '#eab308' : prize.position === 2 ? '#9ca3af' : prize.position === 3 ? '#cd7f32' : 'text.primary' }}>
+                              R$ {prize.value.toFixed(2)}
+                            </Typography>
+                          </Box>
+                        ))
+                      ) : (
+                        <>
+                          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 1, bgcolor: 'rgba(234, 179, 8, 0.05)', borderRadius: 2, borderLeft: '3px solid #eab308' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>🥇 1º Colocado (50%)</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#eab308' }}>
+                              R$ {summary.prizes.first_place.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 1, bgcolor: 'rgba(156, 163, 175, 0.05)', borderRadius: 2, borderLeft: '3px solid #9ca3af' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>🥈 2º Colocado (30%)</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#9ca3af' }}>
+                              R$ {summary.prizes.second_place.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 1, bgcolor: 'rgba(205, 127, 50, 0.05)', borderRadius: 2, borderLeft: '3px solid #cd7f32' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>🥉 3º Colocado (20%)</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#cd7f32' }}>
+                              R$ {summary.prizes.third_place.toFixed(2)}
+                            </Typography>
+                          </Box>
+                        </>
+                      )}
                     </Stack>
                   </Stack>
                 )}

@@ -361,6 +361,7 @@ class PixConfigBase(BaseModel):
     merchant_name: Optional[str] = None
     merchant_city: Optional[str] = None
     entry_fee: float = 0.0
+    prizepool_winners: int = 3
 
 class PixConfigResponse(PixConfigBase):
     id: int

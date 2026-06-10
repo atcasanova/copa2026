@@ -75,6 +75,16 @@ def on_startup():
                     logger.info(f"Adicionando coluna {col_name} na tabela 'users'...")
                     db.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type} {col_constraints}"))
                     db.commit()
+
+            # Ensure prizepool_winners column exists in pix_configs
+            res_pix = db.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='pix_configs' AND column_name='prizepool_winners'"
+            )).fetchone()
+            if not res_pix:
+                logger.info("Adicionando coluna prizepool_winners na tabela 'pix_configs'...")
+                db.execute(text("ALTER TABLE pix_configs ADD COLUMN prizepool_winners INTEGER NOT NULL DEFAULT 3"))
+                db.commit()
                 
         # Ensure default PixConfig row exists
         existing_pix = db.query(PixConfig).filter(PixConfig.id == 1).first()

@@ -166,6 +166,7 @@ def get_payment_config(
             "merchant_name": "",
             "merchant_city": "",
             "entry_fee": 0.0,
+            "prizepool_winners": 3,
             "copia_e_cola": ""
         }
         
@@ -181,6 +182,7 @@ def get_payment_config(
         "merchant_name": config.merchant_name or "",
         "merchant_city": config.merchant_city or "",
         "entry_fee": float(config.entry_fee),
+        "prizepool_winners": config.prizepool_winners,
         "copia_e_cola": copia_cola
     }
 
@@ -230,19 +232,37 @@ def get_payment_summary(db: Session = Depends(get_db)):
     """
     config = db.query(PixConfig).filter(PixConfig.id == 1).first()
     entry_fee = float(config.entry_fee) if config else 0.0
+    winners_count = config.prizepool_winners if config else 3
     
-    approved_count = db.query(User).filter(User.payment_status == "approved").count()
+    approved_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status == "approved"
+    ).count()
     total_collected = entry_fee * approved_count
     
+    from ..settings import calculate_prizepool
+    prizes = calculate_prizepool(total_collected, entry_fee, winners_count)
+    
+    legacy_prizes = {
+        "first_place": 0.0,
+        "second_place": 0.0,
+        "third_place": 0.0
+    }
+    for p in prizes:
+        if p["position"] == 1:
+            legacy_prizes["first_place"] = p["value"]
+        elif p["position"] == 2:
+            legacy_prizes["second_place"] = p["value"]
+        elif p["position"] == 3:
+            legacy_prizes["third_place"] = p["value"]
+            
     return {
         "entry_fee": entry_fee,
         "approved_payments_count": approved_count,
         "total_collected": total_collected,
-        "prizes": {
-            "first_place": total_collected * 0.5,
-            "second_place": total_collected * 0.3,
-            "third_place": total_collected * 0.2
-        }
+        "prizes": legacy_prizes,
+        "prize_list": prizes
     }
 
 @router.post("/submit-proof", response_model=UserResponse)
@@ -302,6 +322,20 @@ async def submit_proof(
     db.add(audit)
     db.commit()
     
+    try:
+        send_payment_proof_email(
+            user=current_user,
+            file_content=content,
+            filename=filename,
+            content_type=file.content_type or "application/octet-stream",
+            pix_key=pix_key_receive,
+            db=db
+        )
+    except Exception as email_err:
+        import logging
+        logger = logging.getLogger("bolao_payments")
+        logger.error(f"Erro ao disparar envio de e-mail do comprovante: {str(email_err)}")
+        
     return current_user
 
 @router.get("/proof/me")
@@ -391,6 +425,75 @@ class ChargeTemplateUpdate(BaseModel):
     template: str
 
 
+def _format_brl(value: float) -> str:
+    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {formatted}"
+
+
+def get_all_placeholder_values(
+    db: Session,
+    target_user_name: str = "Fulano de Tal",
+    debtors_list: list[User] = None
+) -> dict:
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    fee = float(config.entry_fee or 0.0) if config else 0.0
+    winners_count = config.prizepool_winners if config else 3
+
+    # Total active registered users (excluding admins)
+    approved_registry_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True
+    ).count()
+
+    # Total active paid users (excluding admins)
+    approved_payment_count = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.is_active == True,
+        User.payment_status == "approved"
+    ).count()
+
+    # Total registered users (excluding admins)
+    total_registered = db.query(User).filter(
+        User.role.notin_(["system_admin", "score_admin"])
+    ).count()
+
+    # Debtors list & count
+    if debtors_list is None:
+        debtors_query = db.query(User).filter(
+            User.role.notin_(["system_admin", "score_admin"]),
+            User.is_active == True,
+            User.payment_status != "approved"
+        )
+        debtors_list = sorted(debtors_query.all(), key=user_name_sort_key)
+
+    debtors_count = len(debtors_list)
+    names = "\n".join(_sanitize_debtor_name(u.display_name) for u in debtors_list)
+
+    total_val = approved_payment_count * fee
+
+    from ..settings import calculate_prizepool
+    prizes = calculate_prizepool(total_val, fee, winners_count)
+
+    prizepool_text = "\n".join(f"{p['label']}: {_format_brl(p['value'])}" for p in prizes)
+
+    taxa_str = _format_brl(fee)
+    valor_str = _format_brl(total_val)
+
+    safe_user_name = " ".join((target_user_name or "Participante").split())
+
+    return {
+        "usuario": safe_user_name,
+        "devedores": names,
+        "aprovados": approved_registry_count,
+        "aprovados_pagos": approved_payment_count,
+        "valor": valor_str,
+        "prizepool": prizepool_text,
+        "total_cadastrados": total_registered,
+        "devedores_qtd": debtors_count,
+        "taxa_inscricao": taxa_str
+    }
+
+
 @router.get("/admin/charge-template")
 def get_payment_charge_template(
     db: Session = Depends(get_db),
@@ -412,48 +515,9 @@ def get_payment_charge_template(
     )
     template = setting.value if setting else default_val
 
-    approved_registry_count = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.is_active == True
-    ).count()
-
-    approved_payment_count = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.is_active == True,
-        User.payment_status == "approved"
-    ).count()
-
-    total_registered = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"])
-    ).count()
-
-    debtors_query = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.is_active == True,
-        User.payment_status != "approved"
-    )
-    debtors_count = debtors_query.count()
-    debtors_list = sorted(debtors_query.all(), key=user_name_sort_key)
-    names = "\n".join(_sanitize_debtor_name(user.display_name) for user in debtors_list)
-
-    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
-    fee = float(config.entry_fee or 0.0) if config else 0.0
-    total_val = approved_payment_count * fee
-
-    taxa_str = f"R$ {fee:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    valor_str = f"R$ {total_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
     return {
         "template": template,
-        "values": {
-            "devedores": names,
-            "aprovados": approved_registry_count,
-            "aprovados_pagos": approved_payment_count,
-            "valor": valor_str,
-            "total_cadastrados": total_registered,
-            "devedores_qtd": debtors_count,
-            "taxa_inscricao": taxa_str
-        }
+        "values": get_all_placeholder_values(db, target_user_name="Fulano de Tal")
     }
 
 
@@ -495,50 +559,19 @@ def get_payment_approval_template(
         )
 
     setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_approval_template").first()
+    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
+    winners_count = config.prizepool_winners if config else 3
     default_val = (
         "💰 Pagamento de {{usuario}} foi aprovado!\n\n"
         "total na poupança do Gliva: *{{valor}}*\n\n"
-        "Previsão de pagamentos para os 3 primeiros:\n"
+        f"Previsão de pagamentos para os {winners_count} primeiros:\n"
         "{{prizepool}}"
     )
     template = setting.value if setting else default_val
 
-    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
-    fee = float(config.entry_fee or 0.0) if config else 0.0
-    
-    approved_payment_count = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.is_active == True,
-        User.payment_status == "approved"
-    ).count()
-    
-    total_val = approved_payment_count * fee
-    
-    pool = {
-        "first_place": total_val * 0.5,
-        "second_place": total_val * 0.3,
-        "third_place": total_val * 0.2,
-    }
-    
-    from ..notifications import _format_brl
-    prizepool_text = (
-        f"🥇 1º lugar: {_format_brl(pool['first_place'])}\n"
-        f"🥈 2º lugar: {_format_brl(pool['second_place'])}\n"
-        f"🥉 3º lugar: {_format_brl(pool['third_place'])}"
-    )
-    
-    taxa_str = _format_brl(fee)
-    valor_str = _format_brl(total_val)
-
     return {
         "template": template,
-        "values": {
-            "usuario": "Fulano de Tal",
-            "valor": valor_str,
-            "prizepool": prizepool_text,
-            "aprovados_pagos": approved_payment_count,
-            "taxa_inscricao": taxa_str
-        }
+        "values": get_all_placeholder_values(db, target_user_name="Fulano de Tal")
     }
 
 
@@ -565,7 +598,6 @@ def update_payment_approval_template(
 
 
 def _format_payment_charge_message(db: Session, users: list[User]) -> str:
-    names = "\n".join(_sanitize_debtor_name(user.display_name) for user in users)
     setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_charge_template").first()
     if setting and setting.value:
         template = setting.value
@@ -578,38 +610,10 @@ def _format_payment_charge_message(db: Session, users: list[User]) -> str:
             "Sem pagar não pode palpitar! Faça o pagamento 👇"
         )
 
-    approved_registry_count = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.is_active == True
-    ).count()
-
-    approved_payment_count = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.is_active == True,
-        User.payment_status == "approved"
-    ).count()
-
-    total_registered = db.query(User).filter(
-        User.role.notin_(["system_admin", "score_admin"])
-    ).count()
-
-    debtors_count = len(users)
-
-    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
-    fee = float(config.entry_fee or 0.0) if config else 0.0
-    total_val = approved_payment_count * fee
-
-    taxa_str = f"R$ {fee:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    valor_str = f"R$ {total_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
+    vals = get_all_placeholder_values(db, target_user_name="Todos", debtors_list=users)
     msg = template
-    msg = msg.replace("{{devedores}}", names)
-    msg = msg.replace("{{aprovados}}", str(approved_registry_count))
-    msg = msg.replace("{{aprovados_pagos}}", str(approved_payment_count))
-    msg = msg.replace("{{valor}}", valor_str)
-    msg = msg.replace("{{total_cadastrados}}", str(total_registered))
-    msg = msg.replace("{{devedores_qtd}}", str(debtors_count))
-    msg = msg.replace("{{taxa_inscricao}}", taxa_str)
+    for key, val in vals.items():
+        msg = msg.replace(f"{{{{{key}}}}}", str(val))
     return msg
 
 
@@ -835,6 +839,12 @@ def admin_update_config(
             detail="Apenas administradores do sistema podem alterar a configuração do Pix."
         )
         
+    if config_in.prizepool_winners not in [3, 5, 7]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O número de premiados deve ser 3, 5 ou 7."
+        )
+
     config = db.query(PixConfig).filter(PixConfig.id == 1).first()
     if not config:
         config = PixConfig(id=1)
@@ -844,6 +854,7 @@ def admin_update_config(
     config.merchant_name = config_in.merchant_name
     config.merchant_city = config_in.merchant_city
     config.entry_fee = config_in.entry_fee
+    config.prizepool_winners = config_in.prizepool_winners
     
     db.commit()
     db.refresh(config)
@@ -857,10 +868,121 @@ def admin_update_config(
             "pix_key": config.pix_key,
             "merchant_name": config.merchant_name,
             "merchant_city": config.merchant_city,
-            "entry_fee": float(config.entry_fee)
+            "entry_fee": float(config.entry_fee),
+            "prizepool_winners": config.prizepool_winners
         }
     )
     db.add(audit)
     db.commit()
     
     return config
+
+
+def send_payment_proof_email(
+    user: User,
+    file_content: bytes,
+    filename: str,
+    content_type: str,
+    pix_key: str,
+    db: Session
+) -> bool:
+    import logging
+    import smtplib
+    import html
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.application import MIMEApplication
+    from .auth import get_admin_registration_notification_recipients, get_admin_payments_link
+
+    recipients = get_admin_registration_notification_recipients(db)
+    if not recipients:
+        return False
+
+    logger = logging.getLogger("bolao_payment_proof_notification")
+    smtp_host = os.getenv("SMTP_HOST", "172.25.0.1")
+    smtp_port = int(os.getenv("SMTP_PORT", "25"))
+    from_domain = os.getenv("FROM_DOMAIN", "bru.to")
+    sender_email = os.getenv("SMTP_FROM", f"no-reply@{from_domain}")
+    admin_link = get_admin_payments_link()
+
+    safe_display_name = html.escape(user.display_name)
+    safe_username = html.escape(user.username)
+    safe_email = html.escape(user.email)
+    safe_pix_key = html.escape(pix_key)
+    safe_admin_link = html.escape(admin_link, quote=True)
+
+    message = MIMEMultipart("mixed")
+    message["Subject"] = f"Novo comprovante de pagamento - {user.display_name}"
+    message["From"] = sender_email
+    message["To"] = ", ".join(recipients)
+
+    msg_alternative = MIMEMultipart("alternative")
+    
+    text = (
+        "Novo comprovante de pagamento recebido no Bolão Copa 2026.\n\n"
+        f"Nome: {user.display_name}\n"
+        f"Usuário: {user.username}\n"
+        f"E-mail: {user.email}\n"
+        f"Chave Pix: {pix_key}\n\n"
+        f"Acesse o painel de pagamentos para aprovar: {admin_link}\n\n"
+        "O comprovante está anexado a este e-mail."
+    )
+
+    html_body = f"""\
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #111827; background: #f9fafb; padding: 24px;">
+        <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+          <div style="background: #0f172a; color: #ffffff; padding: 20px 24px;">
+            <h1 style="margin: 0; font-size: 20px;">Novo comprovante de pagamento recebido</h1>
+          </div>
+          <div style="padding: 24px;">
+            <p style="margin-top: 0;">O participante <strong>{safe_display_name}</strong> anexou um comprovante de pagamento para validação.</p>
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Nome</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_display_name}</td></tr>
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Usuário</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_username}</td></tr>
+              <tr><td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">E-mail</td><td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{safe_email}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Chave Pix Informada</td><td style="padding: 8px;">{safe_pix_key}</td></tr>
+            </table>
+            <p>O arquivo do comprovante está anexado a este e-mail.</p>
+            <p>Clique no botão abaixo para acessar o painel de pagamentos e realizar a aprovação:</p>
+            <p>
+              <a href="{safe_admin_link}" style="background: #10b981; color: white; padding: 12px 18px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Verificar e Aprovar</a>
+            </p>
+            <p style="font-size: 13px; color: #6b7280;">Se o botão não funcionar, copie e cole este endereço no navegador:<br>{safe_admin_link}</p>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    msg_alternative.attach(MIMEText(text, "plain", "utf-8"))
+    msg_alternative.attach(MIMEText(html_body, "html", "utf-8"))
+    message.attach(msg_alternative)
+
+    try:
+        main_type, sub_type = "application", "octet-stream"
+        if content_type and "/" in content_type:
+            parts = content_type.split("/", 1)
+            main_type, sub_type = parts[0], parts[1]
+            
+        attachment = MIMEApplication(file_content, _subtype=sub_type)
+        attachment.add_header('Content-Disposition', 'attachment', filename=filename)
+        attachment.replace_header('Content-Type', content_type)
+        message.attach(attachment)
+    except Exception as e:
+        logger.error(f"Erro ao anexar arquivo de comprovante de pagamento: {str(e)}")
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            if os.getenv("SMTP_STARTTLS", "false").lower() == "true":
+                server.starttls()
+            username = os.getenv("SMTP_USERNAME")
+            password = os.getenv("SMTP_PASSWORD")
+            if username and password:
+                server.login(username, password)
+            server.sendmail(sender_email, recipients, message.as_string())
+        logger.info(f"E-mail de comprovante de pagamento enviado para os administradores: {recipients}")
+        return True
+    except Exception as e:
+        logger.error(f"Falha ao enviar e-mail de comprovante de pagamento: {str(e)}")
+        return False

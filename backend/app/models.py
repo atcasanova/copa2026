@@ -278,6 +278,7 @@ class PixConfig(Base):
     merchant_name = Column(String, nullable=True)
     merchant_city = Column(String, nullable=True)
     entry_fee = Column(Numeric(10, 2), default=0.0, nullable=False)
+    prizepool_winners = Column(Integer, default=3, server_default="3", nullable=False)
 
 
 class RankingCache(Base):

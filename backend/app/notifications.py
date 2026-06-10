@@ -86,50 +86,59 @@ def _format_brl(value: float) -> str:
 def get_payment_pool_summary(db: Session) -> dict:
     config = db.query(PixConfig).filter(PixConfig.id == 1).first()
     entry_fee = float(config.entry_fee) if config and config.entry_fee is not None else 0.0
+    winners_count = config.prizepool_winners if config else 3
     approved_count = db.query(User).filter(
         User.role.notin_(["system_admin", "score_admin"]),
         User.is_active == True,
         User.payment_status == "approved"
     ).count()
     total_collected = entry_fee * approved_count
+    
+    from .settings import calculate_prizepool
+    prizes = calculate_prizepool(total_collected, entry_fee, winners_count)
+    
+    # Keep legacy keys for safety/tests
+    legacy_prizes = {
+        "first_place": 0.0,
+        "second_place": 0.0,
+        "third_place": 0.0
+    }
+    for p in prizes:
+        if p["position"] == 1:
+            legacy_prizes["first_place"] = p["value"]
+        elif p["position"] == 2:
+            legacy_prizes["second_place"] = p["value"]
+        elif p["position"] == 3:
+            legacy_prizes["third_place"] = p["value"]
+
     return {
         "approved_count": approved_count,
         "total_collected": total_collected,
-        "first_place": total_collected * 0.5,
-        "second_place": total_collected * 0.3,
-        "third_place": total_collected * 0.2,
+        "first_place": legacy_prizes["first_place"],
+        "second_place": legacy_prizes["second_place"],
+        "third_place": legacy_prizes["third_place"],
+        "prizes": prizes,
+        "winners_count": winners_count
     }
 
 
 def format_payment_approval_message(db: Session, display_name: str, payment_pool: dict) -> str:
     setting = db.query(SystemSetting).filter(SystemSetting.key == "payment_approval_template").first()
+    winners_count = payment_pool.get("winners_count", 3) if payment_pool else 3
     default_val = (
         "💰 Pagamento de {{usuario}} foi aprovado!\n\n"
         "total na poupança do Gliva: *{{valor}}*\n\n"
-        "Previsão de pagamentos para os 3 primeiros:\n"
+        f"Previsão de pagamentos para os {winners_count} primeiros:\n"
         "{{prizepool}}"
     )
     template = setting.value if setting and setting.value else default_val
 
-    prizepool_text = (
-        f"🥇 1º lugar: {_format_brl(payment_pool['first_place'])}\n"
-        f"🥈 2º lugar: {_format_brl(payment_pool['second_place'])}\n"
-        f"🥉 3º lugar: {_format_brl(payment_pool['third_place'])}"
-    )
-
-    safe_display_name = " ".join((display_name or "Participante").split())
+    from .routers.payments import get_all_placeholder_values
+    vals = get_all_placeholder_values(db, target_user_name=display_name)
     
     msg = template
-    msg = msg.replace("{{usuario}}", safe_display_name)
-    msg = msg.replace("{{valor}}", _format_brl(payment_pool['total_collected']))
-    msg = msg.replace("{{prizepool}}", prizepool_text)
-    
-    # Extra helpers
-    msg = msg.replace("{{aprovados_pagos}}", str(payment_pool['approved_count']))
-    config = db.query(PixConfig).filter(PixConfig.id == 1).first()
-    fee = float(config.entry_fee or 0.0) if config else 0.0
-    msg = msg.replace("{{taxa_inscricao}}", _format_brl(fee))
-    
+    for key, val in vals.items():
+        msg = msg.replace(f"{{{{{key}}}}}", str(val))
     return msg
 
 
