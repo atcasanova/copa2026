@@ -66,6 +66,14 @@ export default function Dashboard() {
   const [savedPreds, setSavedPreds] = useState({})
 
   const [loading, setLoading] = useState(true)
+
+  const parseApiDateTime = (value) => {
+    if (!value) return new Date(NaN)
+    const text = String(value)
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text)
+    return new Date(hasExplicitTimezone ? text : `${text}Z`)
+  }
+
   const loadDashboardData = async () => {
     try {
       setLoading(true)
@@ -92,11 +100,11 @@ export default function Dashboard() {
         axios.get('/api/matches')
           .then(res => {
             const now = new Date()
-	            const future = res.data.filter(m => {
-	              const kickoff = new Date(m.kickoff_time)
-	              const lockTime = new Date(kickoff.getTime() - lockHours * 60 * 60 * 1000)
-	              return m.status === 'scheduled' && now < lockTime
-	            })
+            const future = res.data.filter(m => {
+              const kickoff = parseApiDateTime(m.kickoff_time)
+              const lockTime = new Date(kickoff.getTime() - lockHours * 60 * 60 * 1000)
+              return m.status === 'scheduled' && now < lockTime
+            })
             setUpcomingMatches(future.slice(0, 4))
           })
           .catch(err => console.error('Erro ao carregar próximas partidas:', err)),
@@ -190,7 +198,7 @@ export default function Dashboard() {
   }
 
   const formatTime = (isoString) => {
-    const d = new Date(isoString)
+    const d = parseApiDateTime(isoString)
     return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
   }
 

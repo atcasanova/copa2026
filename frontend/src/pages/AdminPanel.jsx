@@ -1192,7 +1192,8 @@ export default function AdminPanel() {
               color="primary"
             >
               <ToggleButton value="scores" sx={{ fontWeight: 'bold' }}>
-                ⚽ Gerenciar Placares
+                <Box component="img" src="/icons/icon-48.png" alt="Logo" sx={{ width: 16, height: 16, mr: 1, display: 'inline-block', verticalAlign: 'middle' }} />
+                Gerenciar Placares
               </ToggleButton>
               <ToggleButton value="knockout" sx={{ fontWeight: 'bold' }}>
                 🏆 Definir Confrontos Eliminatórios

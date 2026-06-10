@@ -173,9 +173,16 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
     document.body.removeChild(element)
   }
 
+  const parseApiDateTime = (value) => {
+    if (!value) return new Date(NaN)
+    const text = String(value)
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text)
+    return new Date(hasExplicitTimezone ? text : `${text}Z`)
+  }
+
   const formatDateTime = (isoString) => {
     if (!isoString) return ''
-    const d = new Date(isoString)
+    const d = parseApiDateTime(isoString)
     return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
   }
 
@@ -185,7 +192,8 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
 
   const getLockDate = (kickoffTimeIso) => {
     if (!kickoffTimeIso) return null
-    return new Date(new Date(kickoffTimeIso).getTime() - predictionLockHours * 60 * 60 * 1000)
+    const kickoff = parseApiDateTime(kickoffTimeIso)
+    return new Date(kickoff.getTime() - predictionLockHours * 60 * 60 * 1000)
   }
 
   return (

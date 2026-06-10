@@ -112,7 +112,8 @@ export default function Layout() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
       <Toolbar sx={{ justifyContent: 'center', py: 2 }}>
         <Typography variant="h5" sx={{ fontWeight: 800, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
-          ⚽ Bolão 2026
+          <Box component="img" src="/icons/icon-192.png" alt="Logo" sx={{ width: 28, height: 28 }} />
+          Bolão 2026
         </Typography>
       </Toolbar>
       <Divider />

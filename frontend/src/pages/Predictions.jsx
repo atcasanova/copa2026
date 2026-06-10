@@ -19,7 +19,7 @@ import ExportElementImageButton from '../components/ExportElementImageButton'
 import GroupStandingsTable from '../components/GroupStandingsTable'
 import { getFlagUrl } from '../utils/flags'
 import { getGroupStandings, getActualScore, getPredictionScore } from '../utils/standings'
-import guruIcon from '../assets/guru.png'
+import glivaIcon from '../assets/gliva2.png'
 
 const getFlagUrlLegacy = (emoji) => {
   if (!emoji || emoji === '🏳️') return null
@@ -316,7 +316,7 @@ export default function Predictions() {
   }
 
   const renderLuckyButton = (match, locked) => (
-    <Tooltip title="Palpites AI">
+    <Tooltip title="Pergunte ao Gliva">
       <span>
         <IconButton
           size="small"
@@ -329,17 +329,17 @@ export default function Predictions() {
             user?.role === 'score_admin' ||
             user?.payment_status !== 'approved'
           }
-          aria-label="Palpites AI"
-          sx={{ width: 34, height: 34 }}
+          aria-label="Pergunte ao Gliva"
+          sx={{ width: 40, height: 40 }}
         >
           <Box
             component="img"
-            src={guruIcon}
+            src={glivaIcon}
             alt=""
             aria-hidden="true"
             sx={{
-              width: 23,
-              height: 23,
+              width: 32,
+              height: 32,
               objectFit: 'contain'
             }}
           />
@@ -554,8 +554,9 @@ export default function Predictions() {
 
   return (
     <Box sx={{ mt: 1 }}>
-      <Typography variant="h4" gutterBottom sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 3 }}>
-        ⚽ Registro de Palpites
+      <Typography variant="h4" gutterBottom sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 3, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Box component="img" src="/icons/icon-192.png" alt="Logo" sx={{ width: 36, height: 36 }} />
+        Registro de Palpites
       </Typography>
 
       {user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved' && (
@@ -940,6 +941,9 @@ export default function Predictions() {
 
                     {/* Match Row */}
                     <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ gap: 0.5, mb: 1.5 }}>
+                      {/* Symmetrical placeholder to keep inputs centered */}
+                      {!locked && <Box sx={{ width: 40, flexShrink: 0 }} />}
+
                       {/* Team A */}
                       <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-end' }}>
                         <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -993,7 +997,6 @@ export default function Predictions() {
                             onChange={(e) => handleInputChange(match.id, 'goals_team2', e.target.value)}
                             onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
                           />
-                          {renderLuckyButton(match, locked)}
                         </Box>
                       )}
 
@@ -1008,6 +1011,13 @@ export default function Predictions() {
                           {match.team2?.fifa_code || match.team2_name}
                         </Typography>
                       </Box>
+
+                      {/* Gliva Button */}
+                      {!locked && (
+                        <Box sx={{ flexShrink: 0 }}>
+                          {renderLuckyButton(match, locked)}
+                        </Box>
+                      )}
                     </Box>
 
                     {/* Result and points row */}

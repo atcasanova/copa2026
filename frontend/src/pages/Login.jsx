@@ -56,9 +56,18 @@ export default function Login() {
       <Card sx={{ maxWidth: 450, width: '100%', borderRadius: 4, boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.4)' }}>
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Stack spacing={3} alignItems="center">
-            <Typography variant="h3" sx={{ fontSize: '3rem', fontWeight: 900, textAlign: 'center' }}>
-              ⚽
-            </Typography>
+            <Box 
+              component="img" 
+              src="/icons/icon-512.png" 
+              alt="Logo" 
+              sx={{ 
+                width: 96, 
+                height: 96, 
+                objectFit: 'contain',
+                filter: 'drop-shadow(0px 4px 20px rgba(16, 185, 129, 0.2))',
+                mb: 1
+              }} 
+            />
             <Box textAlign="center">
               <Typography variant="h4" component="h1" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'primary.main' }}>
                 Bolão Copa 2026

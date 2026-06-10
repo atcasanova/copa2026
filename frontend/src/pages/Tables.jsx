@@ -47,8 +47,15 @@ export default function Tables() {
     )
   }
 
+  const parseApiDateTime = (value) => {
+    if (!value) return new Date(NaN)
+    const text = String(value)
+    const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text)
+    return new Date(hasExplicitTimezone ? text : `${text}Z`)
+  }
+
   const formatDateTime = (isoString) => {
-    const d = new Date(isoString)
+    const d = parseApiDateTime(isoString)
     return d.toLocaleString('pt-BR', {
       day: '2-digit',
       month: '2-digit',
