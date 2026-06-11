@@ -85,6 +85,16 @@ def on_startup():
                 logger.info("Adicionando coluna prizepool_winners na tabela 'pix_configs'...")
                 db.execute(text("ALTER TABLE pix_configs ADD COLUMN prizepool_winners INTEGER NOT NULL DEFAULT 3"))
                 db.commit()
+
+            # Ensure live_minute column exists in matches
+            res_matches = db.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='matches' AND column_name='live_minute'"
+            )).fetchone()
+            if not res_matches:
+                logger.info("Adicionando coluna live_minute na tabela 'matches'...")
+                db.execute(text("ALTER TABLE matches ADD COLUMN live_minute VARCHAR NULL"))
+                db.commit()
                 
         # Ensure default PixConfig row exists
         existing_pix = db.query(PixConfig).filter(PixConfig.id == 1).first()

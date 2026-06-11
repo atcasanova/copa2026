@@ -265,8 +265,6 @@ def _candidate_kickoff_times(db: Session, now_utc: datetime) -> list[datetime]:
     rows = db.query(Match.kickoff_time).filter(
         Match.kickoff_time <= cutoff,
         Match.status.notin_(["postponed", "cancelled", "score_confirmed", "finished"]),
-        Match.score_ft_team1 == None,
-        Match.score_ft_team2 == None,
     ).distinct().order_by(Match.kickoff_time.asc()).all()
     return [row[0] for row in rows]
 
@@ -318,8 +316,6 @@ def sync_finished_scores_from_football_data(
         matches = db.query(Match).filter(
             Match.kickoff_time == kickoff_time,
             Match.status.notin_(["postponed", "cancelled", "score_confirmed", "finished"]),
-            Match.score_ft_team1 == None,
-            Match.score_ft_team2 == None,
         ).order_by(Match.id.asc()).all()
         if not matches:
             _append_event(

@@ -14,18 +14,25 @@ import {
 } from '@mui/icons-material'
 import axios from 'axios'
 
-// Helper to serialize object deterministically matching python's json.dumps(..., separators=(',', ':'), sort_keys=True)
+// Helper to serialize object deterministically matching Python's
+// json.dumps(..., separators=(',', ':'), sort_keys=True, ensure_ascii=True).
+const pythonJsonStringify = (value) => (
+  JSON.stringify(value).replace(/[^\x00-\x7F]/g, (char) => (
+    `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`
+  ))
+)
+
 const deterministicStringify = (val) => {
   if (Array.isArray(val)) {
     return '[' + val.map(item => deterministicStringify(item)).join(',') + ']'
   } else if (typeof val === 'object' && val !== null) {
     const sortedKeys = Object.keys(val).sort()
     const parts = sortedKeys.map(k => {
-      return JSON.stringify(k) + ':' + deterministicStringify(val[k])
+      return pythonJsonStringify(k) + ':' + deterministicStringify(val[k])
     })
     return '{' + parts.join(',') + '}'
   } else {
-    return JSON.stringify(val)
+    return typeof val === 'string' ? pythonJsonStringify(val) : JSON.stringify(val)
   }
 }
 
@@ -184,6 +191,12 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
     if (!isoString) return ''
     const d = parseApiDateTime(isoString)
     return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
+  }
+
+  const formatDateTimeInZone = (value, timeZone) => {
+    if (!value) return ''
+    const d = value instanceof Date ? value : parseApiDateTime(value)
+    return d.toLocaleString('pt-BR', { timeZone, dateStyle: 'short', timeStyle: 'short' })
   }
 
   const formatLockHours = (hours) => {
@@ -448,7 +461,7 @@ $str = '${payloadStr}${blockDetails.previous_hash}'
                           Hash Calculado (SHA-256): {calculatedHash}
                         </Typography>
                         <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-                          Isso prova criptograficamente que a lista de palpites abaixo é exatamente a mesma que existia no servidor às {formatDateTime(getLockDate(blockDetails.match?.kickoff_time))} ({formatLockHours(predictionLockHours)} antes do início). Nenhum palpite foi alterado.
+                          Isso prova criptograficamente que a lista de palpites abaixo é exatamente a mesma que existia no servidor às {formatDateTimeInZone(getLockDate(blockDetails.match?.kickoff_time), 'UTC')} UTC ({formatDateTimeInZone(getLockDate(blockDetails.match?.kickoff_time), 'America/Sao_Paulo')} em America/Sao_Paulo), {formatLockHours(predictionLockHours)} antes do início. Nenhum palpite foi alterado.
                         </Typography>
                       </Alert>
                     ) : (

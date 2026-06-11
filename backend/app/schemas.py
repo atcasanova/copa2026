@@ -98,6 +98,7 @@ class MatchResponse(BaseModel):
     score_pen_team1: Optional[int] = None
     score_pen_team2: Optional[int] = None
     score_confirmed_by_admin: bool
+    live_minute: Optional[str] = None
     team1: Optional[TeamResponse] = None
     team2: Optional[TeamResponse] = None
     stadium: Optional[StadiumResponse] = None
@@ -171,6 +172,14 @@ class MatchPredictionVisibilityResponse(BaseModel):
     total_participants: int
     points_summary: List[MatchPredictionPointsSummary] = []
     entries: List[MatchPredictionVisibilityEntry]
+
+class MatchPredictionStatsResponse(BaseModel):
+    match_id: int
+    total_predictions: int
+    total_participants: int
+    team1_win_percentage: int
+    draw_percentage: int
+    team2_win_percentage: int
 
 # Group Schemas
 class GroupCreate(BaseModel):

@@ -59,7 +59,8 @@ def get_or_create_audit_block(db: Session, match_id: int) -> AuditBlock:
             "goals_team2": pred.goals_team2
         })
 
-    # Serialize payload deterministically (sort_keys=True and separators=(',',':') matches standard JS JSON.stringify)
+    # Serialize payload deterministically. Keep Python's default ensure_ascii=True;
+    # the frontend verifier must reproduce this exact representation.
     payload_str = json.dumps(payload, sort_keys=True, separators=(',', ':'), default=str)
 
     # Calculate current block hash: SHA-256(payload_str + previous_hash)

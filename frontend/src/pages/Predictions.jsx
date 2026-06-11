@@ -89,6 +89,7 @@ export default function Predictions() {
   // Data lists
   const [matches, setMatches] = useState([])
   const [predictions, setPredictions] = useState({}) // match_id -> prediction
+  const [predictionStats, setPredictionStats] = useState({}) // match_id -> aggregate stats
   
   // Grouping and Pagination State
   const [groupingMode, setGroupingMode] = useState('date') // 'date' | 'group'
@@ -103,6 +104,7 @@ export default function Predictions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [predictionLockHours, setPredictionLockHours] = useState(3)
+  const [multipliers, setMultipliers] = useState([])
   const [predictionListOpen, setPredictionListOpen] = useState(false)
   const [predictionListMatch, setPredictionListMatch] = useState(null)
   const [predictionListData, setPredictionListData] = useState(null)
@@ -176,6 +178,7 @@ export default function Predictions() {
       
       const settingsRes = await axios.get('/api/predictions/settings')
       setPredictionLockHours(settingsRes.data.prediction_lock_hours ?? 3)
+      setMultipliers(settingsRes.data.multipliers ?? [])
 
       // Load matches
       const matchesRes = await axios.get('/api/matches')
@@ -189,6 +192,17 @@ export default function Predictions() {
         predsMap[p.match_id] = p
       })
       setPredictions(predsMap)
+
+      try {
+        const statsRes = await axios.get('/api/predictions/match-stats')
+        const statsMap = {}
+        statsRes.data.forEach(item => {
+          statsMap[item.match_id] = item
+        })
+        setPredictionStats(statsMap)
+      } catch (err) {
+        setPredictionStats({})
+      }
 
       // Auto-select page on load
       autoSelectPage(loadedMatches, groupingMode)
@@ -400,6 +414,94 @@ export default function Predictions() {
     </Tooltip>
   )
 
+  const getMatchStats = (matchId) => predictionStats[matchId] || null
+
+  const getStageMultiplier = (stageName) => {
+    const multObj = multipliers.find(m => m.stage === stageName);
+    return multObj ? multObj.multiplier : 1.0;
+  };
+
+  const getLivePointsProjection = (predGoals1, predGoals2, liveGoals1, liveGoals2, stage) => {
+    if (
+      predGoals1 === undefined || predGoals2 === undefined ||
+      predGoals1 === null || predGoals2 === null ||
+      predGoals1 === '' || predGoals2 === '' ||
+      liveGoals1 === undefined || liveGoals2 === undefined ||
+      liveGoals1 === null || liveGoals2 === null
+    ) {
+      return { points: 0, label: 'Sem palpite (0 pts)', color: 'default' };
+    }
+    const p1 = Number(predGoals1);
+    const p2 = Number(predGoals2);
+    const a1 = Number(liveGoals1);
+    const a2 = Number(liveGoals2);
+
+    const actResult = a1 > a2 ? 'team1' : (a1 < a2 ? 'team2' : 'draw');
+    const predResult = p1 > p2 ? 'team1' : (p1 < p2 ? 'team2' : 'draw');
+
+    if (actResult !== predResult) {
+      return { points: 0, label: 'Errou o resultado (0 pts)', color: 'default' };
+    }
+
+    let basePoints = 3;
+    let label = 'Resultado correto (3 pts)';
+    let color = 'warning'; // Orange
+
+    if (p1 === a1 && p2 === a2) {
+      basePoints = 10;
+      label = 'Placar exato (10 pts)';
+      color = 'success'; // Green
+    } else if ((a1 - a2) === (p1 - p2)) {
+      basePoints = 6;
+      label = 'Saldo correto (6 pts)';
+      color = 'success';
+    } else if (p1 === a1 || p2 === a2) {
+      basePoints = 4;
+      label = 'Gols de um time + resultado (4 pts)';
+      color = 'warning';
+    }
+
+    const mult = getStageMultiplier(stage);
+    const finalPoints = basePoints * mult;
+
+    return { points: finalPoints, label: `${label.split('(')[0]} (+${finalPoints} pts)`, color };
+  };
+
+  const renderOutcomePercentage = (value, tooltip, align = 'center') => (
+    <Tooltip title={tooltip}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{
+          display: 'block',
+          mt: 0.35,
+          fontWeight: 800,
+          lineHeight: 1,
+          textAlign: align,
+          cursor: 'help'
+        }}
+      >
+        {Math.round(Number(value || 0))}%
+      </Typography>
+    </Tooltip>
+  )
+
+  const renderDrawPercentage = (match) => {
+    const stats = getMatchStats(match.id)
+    if (!stats) return null
+    return (
+      <Tooltip title={`Percentual dos palpites registrados que apostaram em empate neste jogo, considerando apenas as ${stats.total_predictions} pessoas que palpitaram.`}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mt: 0.75, fontWeight: 800, lineHeight: 1, cursor: 'help' }}
+        >
+          Empate {Math.round(Number(stats.draw_percentage || 0))}%
+        </Typography>
+      </Tooltip>
+    )
+  }
+
   const formatDateTime = (isoString) => {
     const d = parseApiDateTime(isoString)
     const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'America/Sao_Paulo' })
@@ -554,6 +656,21 @@ export default function Predictions() {
 
   return (
     <Box sx={{ mt: 1 }}>
+      <style>{`
+        @keyframes pulse {
+          0% { transform: scale(0.9); opacity: 1; }
+          50% { transform: scale(1.25); opacity: 0.5; }
+          100% { transform: scale(0.9); opacity: 1; }
+        }
+        .live-indicator-dot {
+          width: 8px;
+          height: 8px;
+          background-color: #ef4444;
+          border-radius: 50%;
+          display: inline-block;
+          animation: pulse 1.5s infinite ease-in-out;
+        }
+      `}</style>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 3, display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Box component="img" src="/icons/icon-192.png" alt="Logo" sx={{ width: 36, height: 36 }} />
         Registro de Palpites
@@ -707,6 +824,7 @@ export default function Predictions() {
                   const goals1 = pred.goals_team1 ?? '';
                   const goals2 = pred.goals_team2 ?? '';
                   const saveState = saveStates[match.id];
+                  const stats = getMatchStats(match.id);
                   
                   const isFinished = match.status === 'finished' || match.status === 'score_confirmed';
 
@@ -758,19 +876,43 @@ export default function Predictions() {
 
                       {/* Team A */}
                       <TableCell align="right" sx={{ fontWeight: 700, fontSize: '1rem' }}>
-                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                          {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
-                            <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
-                          ) : (
-                            <span>{match.team1?.flag_icon}</span>
+                        <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                            {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
+                              <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                            ) : (
+                              <span>{match.team1?.flag_icon}</span>
+                            )}
+                            {match.team1_name}
+                          </Box>
+                          {locked && stats && (
+                            renderOutcomePercentage(
+                              stats.team1_win_percentage,
+                              `Percentual dos palpites registrados que apostaram em vitória de ${match.team1_name}, considerando apenas as ${stats.total_predictions} pessoas que palpitaram.`,
+                              'right'
+                            )
                           )}
-                          {match.team1_name}
                         </Box>
                       </TableCell>
 
                       {/* Prediction column */}
                       <TableCell align="center">
-                        {locked ? (
+                        {match.status === 'live' ? (
+                          <Stack spacing={0.5} alignItems="center">
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                              <span className="live-indicator-dot" />
+                              <Typography variant="caption" sx={{ fontWeight: 800, color: '#ef4444', textTransform: 'uppercase', fontSize: '0.65rem' }}>
+                                Ao Vivo ({match.live_minute || "0'"})
+                              </Typography>
+                            </Box>
+                            <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '1.1rem', color: 'text.primary' }}>
+                              {match.score_ft_team1} x {match.score_ft_team2}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+                              Meu palpite: <strong style={{ color: '#93c5fd' }}>{goals1 !== '' ? `${goals1} x ${goals2}` : 'Sem palpite'}</strong>
+                            </Typography>
+                          </Stack>
+                        ) : locked ? (
                           goals1 !== '' && goals2 !== '' ? (
                             <Chip 
                               label={`${goals1} x ${goals2}`} 
@@ -813,16 +955,26 @@ export default function Predictions() {
                             </Box>
                           </Stack>
                         )}
+                        {locked && renderDrawPercentage(match)}
                       </TableCell>
 
                       {/* Team B */}
                       <TableCell align="left" sx={{ fontWeight: 700, fontSize: '1rem' }}>
-                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                          {match.team2_name}
-                          {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
-                            <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
-                          ) : (
-                            <span>{match.team2?.flag_icon}</span>
+                        <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                            {match.team2_name}
+                            {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
+                              <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1.5, objectFit: 'cover' }} />
+                            ) : (
+                              <span>{match.team2?.flag_icon}</span>
+                            )}
+                          </Box>
+                          {locked && stats && (
+                            renderOutcomePercentage(
+                              stats.team2_win_percentage,
+                              `Percentual dos palpites registrados que apostaram em vitória de ${match.team2_name}, considerando apenas as ${stats.total_predictions} pessoas que palpitaram.`,
+                              'left'
+                            )
                           )}
                         </Box>
                       </TableCell>
@@ -851,6 +1003,25 @@ export default function Predictions() {
                             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.65rem', maxWidth: 150, mx: 'auto', lineHeight: 1.1 }}>
                               {pred.scoring_explanation}
                             </Typography>
+                          </Box>
+                        ) : match.status === 'live' ? (
+                          <Box>
+                            {(() => {
+                              const proj = getLivePointsProjection(goals1, goals2, match.score_ft_team1, match.score_ft_team2, match.stage);
+                              return (
+                                <>
+                                  <Chip 
+                                    label={proj.label} 
+                                    color={proj.color} 
+                                    size="small" 
+                                    sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 0.5 }} 
+                                  />
+                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.65rem' }}>
+                                    Projeção em Tempo Real
+                                  </Typography>
+                                </>
+                              );
+                            })()}
                           </Box>
                         ) : locked ? (
                           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
@@ -901,6 +1072,7 @@ export default function Predictions() {
               const goals1 = pred.goals_team1 ?? '';
               const goals2 = pred.goals_team2 ?? '';
               const saveState = saveStates[match.id];
+              const stats = getMatchStats(match.id);
               const isFinished = match.status === 'finished' || match.status === 'score_confirmed';
 
               return (
@@ -939,26 +1111,55 @@ export default function Predictions() {
                       </Stack>
                     </Box>
 
+                    {/* Live score box on mobile */}
+                    {match.status === 'live' && (
+                      <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column" sx={{ mb: 1.5, py: 1, bgcolor: 'rgba(239, 68, 68, 0.05)', borderRadius: 2, border: '1px dashed rgba(239, 68, 68, 0.2)' }}>
+                        <Box display="flex" alignItems="center" gap={0.5}>
+                          <span className="live-indicator-dot" />
+                          <Typography variant="caption" sx={{ fontWeight: 800, color: '#ef4444', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                            Ao Vivo ({match.live_minute || "0'"})
+                          </Typography>
+                        </Box>
+                        <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'text.primary', mt: 0.5 }}>
+                          {match.score_ft_team1} x {match.score_ft_team2}
+                        </Typography>
+                      </Box>
+                    )}
+
                     {/* Match Row */}
                     <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ gap: 0.5, mb: 1.5 }}>
                       {/* Symmetrical placeholder to keep inputs centered */}
                       {!locked && <Box sx={{ width: 40, flexShrink: 0 }} />}
 
                       {/* Team A */}
-                      <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-end' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {match.team1?.fifa_code || match.team1_name}
-                        </Typography>
-                        {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
-                          <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
-                        ) : (
-                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team1?.flag_icon}</span>
+                      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                        <Box display="flex" alignItems="center" gap={0.5} sx={{ minWidth: 0, justifyContent: 'flex-end', width: '100%' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {match.team1?.fifa_code || match.team1_name}
+                          </Typography>
+                          {getFlagUrl(match.team1?.flag_icon, match.team1) ? (
+                            <img src={getFlagUrl(match.team1.flag_icon, match.team1)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
+                          ) : (
+                            <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team1?.flag_icon}</span>
+                          )}
+                        </Box>
+                        {locked && stats && (
+                          renderOutcomePercentage(
+                            stats.team1_win_percentage,
+                            `Percentual dos palpites registrados que apostaram em vitória de ${match.team1_name}, considerando apenas as ${stats.total_predictions} pessoas que palpitaram.`,
+                            'right'
+                          )
                         )}
                       </Box>
 
                       {/* Guess display or inputs */}
                       {locked ? (
-                        <Box sx={{ flexShrink: 0 }}>
+                        <Box sx={{ flexShrink: 0, textAlign: 'center' }}>
+                          {match.status === 'live' && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.6rem', color: 'text.secondary', fontWeight: 'bold', mb: 0.25 }}>
+                              PALPITE
+                            </Typography>
+                          )}
                           {goals1 !== '' && goals2 !== '' ? (
                             <Chip 
                               label={`${goals1} x ${goals2}`} 
@@ -975,6 +1176,7 @@ export default function Predictions() {
                               size="small" 
                             />
                           )}
+                          {renderDrawPercentage(match)}
                         </Box>
                       ) : (
                         <Box display="flex" alignItems="center" gap={0.5} sx={{ flexShrink: 0, px: 0.5 }}>
@@ -1001,15 +1203,24 @@ export default function Predictions() {
                       )}
 
                       {/* Team B */}
-                      <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0, justifyContent: 'flex-start' }}>
-                        {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
-                          <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
-                        ) : (
-                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team2?.flag_icon}</span>
+                      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                        <Box display="flex" alignItems="center" gap={0.5} sx={{ minWidth: 0, justifyContent: 'flex-start', width: '100%' }}>
+                          {getFlagUrl(match.team2?.flag_icon, match.team2) ? (
+                            <img src={getFlagUrl(match.team2.flag_icon, match.team2)} alt="" style={{ width: 20, height: 14, borderRadius: 1, flexShrink: 0 }} />
+                          ) : (
+                            <span style={{ fontSize: '1rem', flexShrink: 0 }}>{match.team2?.flag_icon}</span>
+                          )}
+                          <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {match.team2?.fifa_code || match.team2_name}
+                          </Typography>
+                        </Box>
+                        {locked && stats && (
+                          renderOutcomePercentage(
+                            stats.team2_win_percentage,
+                            `Percentual dos palpites registrados que apostaram em vitória de ${match.team2_name}, considerando apenas as ${stats.total_predictions} pessoas que palpitaram.`,
+                            'left'
+                          )
                         )}
-                        <Typography variant="body2" sx={{ fontWeight: 800, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {match.team2?.fifa_code || match.team2_name}
-                        </Typography>
                       </Box>
 
                       {/* Gliva Button */}
@@ -1052,6 +1263,25 @@ export default function Predictions() {
                                 sx={{ fontWeight: 800, fontFamily: 'Outfit' }} 
                               />
                             )}
+                          </Box>
+                        ) : match.status === 'live' ? (
+                          <Box>
+                            {(() => {
+                              const proj = getLivePointsProjection(goals1, goals2, match.score_ft_team1, match.score_ft_team2, match.stage);
+                              return (
+                                <>
+                                  <Chip 
+                                    label={proj.label} 
+                                    color={proj.color} 
+                                    size="small" 
+                                    sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 0.5 }} 
+                                  />
+                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.65rem' }}>
+                                    Projeção em Tempo Real
+                                  </Typography>
+                                </>
+                              );
+                            })()}
                           </Box>
                         ) : locked ? (
                           <Typography variant="caption" color="text.secondary">Jogo em andamento</Typography>

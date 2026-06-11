@@ -3,6 +3,7 @@ from .sync import sync_openfootball_data
 from .db import SessionLocal
 from .notifications import send_due_prediction_reminders
 from .football_data import sync_finished_scores_from_football_data, sync_fixtures_from_football_data
+from .fifa import sync_fifa_scores_and_live
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import logging
@@ -55,6 +56,17 @@ def scheduled_football_data_fixtures_job():
     finally:
         db.close()
 
+def scheduled_fifa_live_job():
+    db = SessionLocal()
+    try:
+        results = sync_fifa_scores_and_live(db)
+        if results.get("live_updates") or results.get("finished_updates") or results.get("skipped_extra_time"):
+            logger.info(f"[Scheduler] Sincronização FIFA concluída: {results}")
+    except Exception as e:
+        logger.error(f"[Scheduler] Falha ao executar sincronização FIFA: {str(e)}")
+    finally:
+        db.close()
+
 def openfootball_daily_sync_enabled():
     return os.getenv("OPENFOOTBALL_DAILY_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
@@ -92,6 +104,14 @@ def start_scheduler():
         'interval',
         minutes=15,
         id='football_data_fixtures_job',
+        replace_existing=True,
+        next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo"))
+    )
+    scheduler.add_job(
+        scheduled_fifa_live_job,
+        'interval',
+        minutes=3,
+        id='fifa_live_job',
         replace_existing=True,
         next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo"))
     )

@@ -6,13 +6,23 @@ from datetime import datetime, timedelta, timezone
 from collections import Counter
 from ..db import get_db
 from ..models import Prediction, Match, User, AuditLog
-from ..schemas import PredictionCreate, PredictionResponse, PredictionBulkUpdate, MatchResponse, MatchPredictionVisibilityResponse
+from ..schemas import (
+    PredictionCreate, PredictionResponse, PredictionBulkUpdate, MatchResponse,
+    MatchPredictionVisibilityResponse, MatchPredictionStatsResponse
+)
 from ..auth import get_current_active_user
 from ..settings import get_prediction_lock_hours, get_locked_match_cutoff, is_match_locked_for_predictions
 from ..scoring import DEFAULT_MULTIPLIERS, get_stage_multiplier, invalidate_ranking_cache
 from uuid import UUID
 
 router = APIRouter(prefix="/api/predictions", tags=["Predictions"])
+
+def _approved_participant_filters():
+    return (
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status == "approved",
+    )
 
 def check_match_locked(db: Session, match: Match) -> bool:
     """
@@ -329,6 +339,50 @@ def get_matches_locking_soon(
     locking_soon_missing = [m for m in soon_matches if m.id not in pred_match_ids]
     return locking_soon_missing
 
+@router.get("/match-stats", response_model=List[MatchPredictionStatsResponse])
+def get_match_prediction_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Returns aggregate prediction outcome percentages by match.
+    Percentages are based on the number of predictions registered for each match.
+    """
+    rows = db.query(
+        Prediction.match_id,
+        Prediction.goals_team1,
+        Prediction.goals_team2,
+    ).join(User, User.id == Prediction.user_id).filter(
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"])
+    ).all()
+
+    by_match = {}
+    for match_id, goals_team1, goals_team2 in rows:
+        stats = by_match.setdefault(match_id, {"total": 0, "team1": 0, "draw": 0, "team2": 0})
+        stats["total"] += 1
+        if goals_team1 > goals_team2:
+            stats["team1"] += 1
+        elif goals_team1 < goals_team2:
+            stats["team2"] += 1
+        else:
+            stats["draw"] += 1
+
+    def pct(count, total):
+        return int(round((count / total) * 100)) if total else 0
+
+    return [
+        {
+            "match_id": match_id,
+            "total_predictions": stats["total"],
+            "total_participants": stats["total"],
+            "team1_win_percentage": pct(stats["team1"], stats["total"]),
+            "draw_percentage": pct(stats["draw"], stats["total"]),
+            "team2_win_percentage": pct(stats["team2"], stats["total"]),
+        }
+        for match_id, stats in by_match.items()
+    ]
+
 @router.get("/match/{match_id}/visibility", response_model=MatchPredictionVisibilityResponse)
 def get_match_prediction_visibility(
     match_id: int,
@@ -346,15 +400,11 @@ def get_match_prediction_visibility(
     locked = is_match_locked_for_predictions(db, match)
     is_scored = match.score_ft_team1 is not None and match.score_ft_team2 is not None
     total_participants = db.query(User).filter(
-        User.is_active == True,
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.payment_status == "approved"
+        *_approved_participant_filters()
     ).count()
     predictions = db.query(Prediction).join(User, User.id == Prediction.user_id).filter(
         Prediction.match_id == match_id,
-        User.is_active == True,
-        User.role.notin_(["system_admin", "score_admin"]),
-        User.payment_status == "approved"
+        *_approved_participant_filters()
     ).all()
     predictions.sort(
         key=lambda pred: (

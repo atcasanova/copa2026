@@ -332,6 +332,57 @@ def test_match_prediction_visibility_hides_scores_before_lock(client, db_session
     assert data["entries"][0]["goals_team2"] is None
 
 
+def test_match_prediction_stats_are_based_on_people_who_predicted_the_match(client, db_session, test_users):
+    viewer = test_users[2]
+    participant = test_users[3]
+    pending = User(
+        username="pending_stats_user",
+        email="pending_stats@test.com",
+        display_name="Pendente Stats",
+        hashed_password=get_password_hash("password"),
+        role="participant",
+        payment_status="submitted",
+    )
+
+    db_session.add_all([
+        pending,
+        Team(name="Japao", group_name="A"),
+        Team(name="Coreia", group_name="A"),
+        Stadium(name="Stats Stadium", city="City", timezone="UTC")
+    ])
+    db_session.commit()
+
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="18:00 UTC+0",
+        kickoff_time=datetime.utcnow() + timedelta(hours=1),
+        team1_name="Japao",
+        team2_name="Coreia",
+        ground="Stats Stadium",
+        status="scheduled"
+    )
+    db_session.add(match)
+    db_session.commit()
+    db_session.add_all([
+        Prediction(match_id=match.id, user_id=viewer.id, goals_team1=2, goals_team2=1),
+        Prediction(match_id=match.id, user_id=participant.id, goals_team1=1, goals_team2=1),
+        Prediction(match_id=match.id, user_id=pending.id, goals_team1=0, goals_team2=1),
+    ])
+    db_session.commit()
+
+    res = client.get("/api/predictions/match-stats", headers=login_headers(client, viewer.username))
+
+    assert res.status_code == 200
+    row = next(item for item in res.json() if item["match_id"] == match.id)
+    assert row["total_predictions"] == 3
+    assert row["total_participants"] == 3
+    assert row["team1_win_percentage"] == 33
+    assert row["draw_percentage"] == 33
+    assert row["team2_win_percentage"] == 33
+
+
 def test_match_prediction_visibility_shows_scores_after_lock(client, db_session, test_users):
     viewer = test_users[2]
     participant = test_users[3]

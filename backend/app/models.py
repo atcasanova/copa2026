@@ -77,6 +77,7 @@ class Match(Base):
     score_pen_team1 = Column(Integer, nullable=True)
     score_pen_team2 = Column(Integer, nullable=True)
     score_confirmed_by_admin = Column(Boolean, default=False, nullable=False)
+    live_minute = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
