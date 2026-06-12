@@ -417,22 +417,9 @@ def get_rankings(db: Session, group_id: str = None, stage: str = None, date_str:
 
     ranking_list.sort(key=sort_key)
 
-    # Assign positions (handling ties: same stats get same position)
-    current_pos = 1
+    # Assign positions (each user gets a unique position based on tie-breakers)
     for idx, row in enumerate(ranking_list):
-        if idx > 0:
-            prev = ranking_list[idx - 1]
-            # Check if tied on all sorting metrics except registration date and alphabetical name
-            is_tied = (
-                row["total_points"] == prev["total_points"] and
-                row["exact_scores_count"] == prev["exact_scores_count"] and
-                row["correct_results_count"] == prev["correct_results_count"] and
-                row["knockout_points"] == prev["knockout_points"] and
-                row["missing_predictions_count"] == prev["missing_predictions_count"]
-            )
-            if not is_tied:
-                current_pos = idx + 1
-        row["position"] = current_pos
+        row["position"] = idx + 1
 
     # Save to cache before returning
     try:

@@ -262,8 +262,7 @@ def format_ranking_message(ranking: list[dict]) -> str:
             else:
                 movement = f" \U0001f534\u2b07\ufe0f{abs(position_change)}"
         lines.append(
-            f"{prefix} *{row['display_name']}*{movement} - {row['total_points']} pts "
-            f"({row['exact_scores_count']} exatos, {row['correct_results_count']} resultados)"
+            f"{prefix} *{row['display_name']}*{movement} - {row['total_points']} pts"
         )
     return "\n".join(lines)
 

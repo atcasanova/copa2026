@@ -347,7 +347,7 @@ export default function GroupDetails() {
                       <TableCell>Participante</TableCell>
                       <TableCell align="center">Pontos</TableCell>
                       <TableCell align="center">Placares Exatos</TableCell>
-                      <TableCell align="center">Resultados</TableCell>
+                      <TableCell align="center">Apenas Vencedor/Empate</TableCell>
                       <TableCell align="center">Palpites</TableCell>
                     </TableRow>
                   </TableHead>
@@ -399,7 +399,7 @@ export default function GroupDetails() {
                             {row.total_points}
                           </TableCell>
                           <TableCell align="center">{row.exact_scores_count}</TableCell>
-                          <TableCell align="center">{row.correct_results_count}</TableCell>
+                          <TableCell align="center">{row.correct_results_count - row.exact_scores_count}</TableCell>
                           <TableCell align="center">{row.predictions_count}</TableCell>
                         </TableRow>
                       )

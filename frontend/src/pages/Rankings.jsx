@@ -233,7 +233,7 @@ export default function Rankings() {
                   {row.display_name} {isMe && '(Você)'}
                 </Typography>
                 {showTieBreakerHelp && (
-                  <Tooltip title={`Desempates: ${row.exact_scores_count} placar(es) exato(s), ${row.correct_results_count} resultado(s) correto(s), ${row.knockout_points || 0} ponto(s) no mata-mata, ${row.missing_predictions_count} palpite(s) faltante(s) em jogos bloqueados. Palpites registrados: ${row.predictions_count}.`}>
+                  <Tooltip title={`Desempates: ${row.exact_scores_count} placar(es) exato(s), ${row.correct_results_count - row.exact_scores_count} apenas resultado(s) (vencedor/empate), ${row.knockout_points || 0} ponto(s) no mata-mata, ${row.missing_predictions_count} palpite(s) faltante(s) em jogos bloqueados. Palpites registrados: ${row.predictions_count}.`}>
                     <HelpOutline sx={{ fontSize: '0.95rem', cursor: 'help', color: 'text.secondary' }} />
                   </Tooltip>
                 )}
@@ -250,7 +250,7 @@ export default function Rankings() {
           </TableCell>
 
           <TableCell align="center">
-            {row.correct_results_count}
+            {row.correct_results_count - row.exact_scores_count}
           </TableCell>
         </TableRow>
       )
