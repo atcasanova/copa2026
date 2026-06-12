@@ -31,16 +31,9 @@ const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
 const prepareImagesForExport = (clone) => {
   clone.querySelectorAll('img').forEach((img) => {
     try {
-      const url = new URL(img.getAttribute('src') || '', window.location.origin)
-      if (url.origin !== window.location.origin) {
-        img.removeAttribute('src')
-        img.style.visibility = 'hidden'
-      } else {
-        img.setAttribute('src', url.href)
-      }
+      img.remove()
     } catch (err) {
-      img.removeAttribute('src')
-      img.style.visibility = 'hidden'
+      img.style.display = 'none'
     }
   })
 }
