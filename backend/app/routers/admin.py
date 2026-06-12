@@ -773,6 +773,65 @@ def update_prediction_lock_setting(
         "updated_at": setting.updated_at
     }
 
+
+from pydantic import BaseModel
+
+class MatchNotificationsSettings(BaseModel):
+    goal_enabled: bool
+    goal_template: str
+    start_enabled: bool
+    start_template: str
+    end_enabled: bool
+    end_template: str
+
+@router.get("/settings/match-notifications", response_model=MatchNotificationsSettings)
+def get_match_notifications_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    goal_enabled_s = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_goal_enabled").first()
+    goal_template_s = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_goal_template").first()
+    start_enabled_s = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_start_enabled").first()
+    start_template_s = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_start_template").first()
+    end_enabled_s = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_end_enabled").first()
+    end_template_s = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_end_template").first()
+    
+    return {
+        "goal_enabled": goal_enabled_s.value.lower() in {"1", "true", "yes", "on"} if goal_enabled_s else True,
+        "goal_template": goal_template_s.value if goal_template_s else "⚽ GOL! {{score}}",
+        "start_enabled": start_enabled_s.value.lower() in {"1", "true", "yes", "on"} if start_enabled_s else True,
+        "start_template": start_template_s.value if start_template_s else "🎬 Bola rolando! {{match}} começou!",
+        "end_enabled": end_enabled_s.value.lower() in {"1", "true", "yes", "on"} if end_enabled_s else True,
+        "end_template": end_template_s.value if end_template_s else "🏁 Fim de papo! {{match}} finalizado. Placar: {{score}}",
+    }
+
+@router.put("/settings/match-notifications", response_model=MatchNotificationsSettings)
+def update_match_notifications_settings(
+    payload: MatchNotificationsSettings,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin)
+):
+    settings_dict = {
+        "whatsapp_match_goal_enabled": "true" if payload.goal_enabled else "false",
+        "whatsapp_match_goal_template": payload.goal_template,
+        "whatsapp_match_start_enabled": "true" if payload.start_enabled else "false",
+        "whatsapp_match_start_template": payload.start_template,
+        "whatsapp_match_end_enabled": "true" if payload.end_enabled else "false",
+        "whatsapp_match_end_template": payload.end_template,
+    }
+    
+    for key, val in settings_dict.items():
+        setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if not setting:
+            setting = SystemSetting(key=key, value=val)
+            db.add(setting)
+        else:
+            setting.value = val
+            setting.updated_at = datetime.utcnow()
+            
+    db.commit()
+    return payload
+
 @router.get("/multipliers", response_model=List[StageMultiplierResponse])
 def get_multipliers(
     db: Session = Depends(get_db),

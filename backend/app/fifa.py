@@ -116,22 +116,38 @@ def sync_fifa_scores_and_live(db: Session) -> dict:
         if status_code == 3:  # Live
             local_match = find_local_match(api_match, db_matches)
             if local_match and local_match.status != "score_confirmed":
-                home_score = api_match.get("HomeTeamScore")
-                away_score = api_match.get("AwayTeamScore")
-                match_time = api_match.get("MatchTime") or "0'"
-                
-                if (local_match.score_ft_team1 != home_score or 
-                    local_match.score_ft_team2 != away_score or 
-                    local_match.status != "live" or 
-                    local_match.live_minute != match_time):
-                    
-                    local_match.status = "live"
-                    local_match.score_ft_team1 = home_score
-                    local_match.score_ft_team2 = away_score
-                    local_match.live_minute = match_time
-                    db.commit()
-                    results["live_updates"] += 1
-                    logger.info(f"Partida {local_match.team1_name} x {local_match.team2_name} atualizada para AO VIVO ({match_time}) - Placar: {home_score} x {away_score}")
+                 home_score = api_match.get("HomeTeamScore")
+                 away_score = api_match.get("AwayTeamScore")
+                 match_time = api_match.get("MatchTime") or "0'"
+                 
+                 old_status = local_match.status
+                 old_score1 = local_match.score_ft_team1
+                 old_score2 = local_match.score_ft_team2
+
+                 if (local_match.score_ft_team1 != home_score or 
+                     local_match.score_ft_team2 != away_score or 
+                     local_match.status != "live" or 
+                     local_match.live_minute != match_time):
+                     
+                     local_match.status = "live"
+                     local_match.score_ft_team1 = home_score
+                     local_match.score_ft_team2 = away_score
+                     local_match.live_minute = match_time
+                     db.commit()
+                     results["live_updates"] += 1
+                     logger.info(f"Partida {local_match.team1_name} x {local_match.team2_name} atualizada para AO VIVO ({match_time}) - Placar: {home_score} x {away_score}")
+
+                     # 1. Notification for match start
+                     if old_status != "live":
+                         from .notifications import send_match_start_notification
+                         send_match_start_notification(db, local_match)
+
+                     # 2. Notification for goal
+                     baseline1 = old_score1 if old_score1 is not None else 0
+                     baseline2 = old_score2 if old_score2 is not None else 0
+                     if (home_score is not None and home_score > baseline1) or (away_score is not None and away_score > baseline2):
+                         from .notifications import send_match_goal_notification
+                         send_match_goal_notification(db, local_match, home_score, away_score)
 
     # Re-fetch local matches that are not finished
     pending_matches = db.query(Match).filter(
@@ -210,6 +226,9 @@ def sync_fifa_scores_and_live(db: Session) -> dict:
             match.score_confirmed_by_admin = False
             
             db.flush()
+
+            from .notifications import send_match_end_notification
+            send_match_end_notification(db, match, home_score, away_score)
 
             db.add(AuditLog(
                 user_id=None,

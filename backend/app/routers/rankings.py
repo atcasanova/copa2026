@@ -131,7 +131,7 @@ def get_my_ranking_positions(
     Returns the user's positions in the general ranking and in all groups they belong to.
     """
     general = get_rankings(db)
-    my_general = next((row for row in general if row["user_id"] == current_user.id), None)
+    my_general = next((row for row in general if str(row["user_id"]) == str(current_user.id)), None)
     
     # Get user memberships
     memberships = db.query(GroupMember).filter(
@@ -142,7 +142,7 @@ def get_my_ranking_positions(
     group_positions = []
     for mem in memberships:
         group_ranking = get_rankings(db, group_id=mem.group_id)
-        my_group_row = next((row for row in group_ranking if row["user_id"] == current_user.id), None)
+        my_group_row = next((row for row in group_ranking if str(row["user_id"]) == str(current_user.id)), None)
         group_positions.append({
             "group_id": mem.group_id,
             "group_name": mem.group.name,

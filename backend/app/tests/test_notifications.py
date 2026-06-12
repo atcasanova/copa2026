@@ -192,3 +192,93 @@ def test_ranking_message_uses_medals_for_top_three():
     assert "\U0001f949 *Caio*" in message
     assert "\U0001f7e2\u2b06\ufe0f2" in message
     assert "\U0001f534\u2b07\ufe0f1" in message
+
+
+def test_live_match_notifications(client, db_session, test_users, monkeypatch):
+    captured = _capture_whatsapp(monkeypatch)
+    
+    t1 = Team(name="Brasil", group_name="A", flag_icon="🇧🇷", fifa_code="BRA")
+    t2 = Team(name="Argentina", group_name="A", flag_icon="🇦🇷", fifa_code="ARG")
+    st = Stadium(name="Notif Stadium", city="City", timezone="America/Sao_Paulo")
+    db_session.add_all([t1, t2, st])
+    db_session.commit()
+    
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-11",
+        time_str="18:00 UTC",
+        kickoff_time=datetime.utcnow() - timedelta(minutes=5),
+        team1_name="Brasil",
+        team2_name="Argentina",
+        ground="Notif Stadium",
+        status="scheduled"
+    )
+    db_session.add(match)
+    db_session.commit()
+    
+    api_payload = {
+        "Results": [
+            {
+                "MatchStatus": 3,  # Live
+                "MatchTime": "5'",
+                "Date": match.kickoff_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "Home": {
+                    "TeamName": [{"Description": "Brazil"}],
+                    "ShortClubName": "Brazil",
+                    "Abbreviation": "BRA"
+                },
+                "Away": {
+                    "TeamName": [{"Description": "Argentina"}],
+                    "ShortClubName": "Argentina",
+                    "Abbreviation": "ARG"
+                },
+                "HomeTeamScore": 1,
+                "AwayTeamScore": 0,
+                "ResultType": 1
+            }
+        ]
+    }
+    
+    class FakeFifaResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return api_payload
+            
+    def fake_fifa_get(url, *args, **kwargs):
+        return FakeFifaResponse()
+        
+    monkeypatch.setattr("app.fifa.requests.get", fake_fifa_get)
+    
+    from app.fifa import sync_fifa_scores_and_live
+    sync_fifa_scores_and_live(db_session)
+    
+    assert len(captured) == 2
+    assert "Bola rolando" in captured[0]["files"]["text"][1]
+    assert "GOL" in captured[1]["files"]["text"][1]
+    assert "BRA 🇧🇷1 X 0 🇦🇷ARG" in captured[1]["files"]["text"][1]
+    
+    system_admin_headers = login_headers(client, test_users[0].username)
+    
+    get_res = client.get("/api/admin/settings/match-notifications", headers=system_admin_headers)
+    assert get_res.status_code == 200
+    data = get_res.json()
+    assert data["goal_enabled"] is True
+    assert data["goal_template"] == "⚽ GOL! {{score}}"
+    
+    put_res = client.put(
+        "/api/admin/settings/match-notifications",
+        headers=system_admin_headers,
+        json={
+            "goal_enabled": False,
+            "goal_template": "GOLAZO {{score}}",
+            "start_enabled": True,
+            "start_template": "Iniciou",
+            "end_enabled": False,
+            "end_template": "Fim"
+        }
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["goal_enabled"] is False
+    assert put_res.json()["goal_template"] == "GOLAZO {{score}}"

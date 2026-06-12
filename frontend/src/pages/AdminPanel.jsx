@@ -122,6 +122,13 @@ export default function AdminPanel() {
   const [approvalTemplate, setApprovalTemplate] = useState('')
   const [approvalValues, setApprovalValues] = useState({})
   const [savingApprovalTemplate, setSavingApprovalTemplate] = useState(false)
+  const [matchNotifGoalEnabled, setMatchNotifGoalEnabled] = useState(true)
+  const [matchNotifGoalTemplate, setMatchNotifGoalTemplate] = useState('')
+  const [matchNotifStartEnabled, setMatchNotifStartEnabled] = useState(true)
+  const [matchNotifStartTemplate, setMatchNotifStartTemplate] = useState('')
+  const [matchNotifEndEnabled, setMatchNotifEndEnabled] = useState(true)
+  const [matchNotifEndTemplate, setMatchNotifEndTemplate] = useState('')
+  const [savingMatchNotifSettings, setSavingMatchNotifSettings] = useState(false)
 
   // 4. Users State
   const [usersList, setUsersList] = useState([])
@@ -761,10 +768,47 @@ export default function AdminPanel() {
     }
   }
 
+  const loadMatchNotifSettings = async () => {
+    try {
+      const res = await axios.get('/api/admin/settings/match-notifications')
+      setMatchNotifGoalEnabled(res.data.goal_enabled)
+      setMatchNotifGoalTemplate(res.data.goal_template)
+      setMatchNotifStartEnabled(res.data.start_enabled)
+      setMatchNotifStartTemplate(res.data.start_template)
+      setMatchNotifEndEnabled(res.data.end_enabled)
+      setMatchNotifEndTemplate(res.data.end_template)
+    } catch (err) {
+      setError('Erro ao carregar configurações de notificações de jogos.')
+    }
+  }
+
+  const handleSaveMatchNotifSettings = async (e) => {
+    e.preventDefault()
+    setSavingMatchNotifSettings(true)
+    setError('')
+    setSuccess('')
+    try {
+      await axios.put('/api/admin/settings/match-notifications', {
+        goal_enabled: matchNotifGoalEnabled,
+        goal_template: matchNotifGoalTemplate,
+        start_enabled: matchNotifStartEnabled,
+        start_template: matchNotifStartTemplate,
+        end_enabled: matchNotifEndEnabled,
+        end_template: matchNotifEndTemplate,
+      })
+      showSuccess('Configurações de notificações de jogos salvas com sucesso!')
+    } catch (err) {
+      setError('Erro ao salvar configurações de notificações de jogos.')
+    } finally {
+      setSavingMatchNotifSettings(false)
+    }
+  }
+
   useEffect(() => {
     if (tabIndex === 'announcements' && user) {
       loadChargeTemplate()
       loadApprovalTemplate()
+      loadMatchNotifSettings()
     }
   }, [tabIndex, user])
 
@@ -2554,6 +2598,121 @@ export default function AdminPanel() {
                     </Box>
                   </Grid>
                 </Grid>
+              </Box>
+            </CardContent>
+          </Card>
+
+          {/* New Card: Live Match Notifications Settings */}
+          <Card>
+            <CardContent sx={{ p: 4 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, fontFamily: 'Outfit', mb: 2 }}>
+                📡 Notificações de Jogos Ao Vivo (WhatsApp)
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Configure as notificações automáticas enviadas ao grupo do WhatsApp no início, gols e fim de cada partida.
+              </Typography>
+              <Box component="form" onSubmit={handleSaveMatchNotifSettings}>
+                <Stack spacing={4}>
+                  {/* Match Start Notifications */}
+                  <Box sx={{ p: 2.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox 
+                          checked={matchNotifStartEnabled} 
+                          onChange={(e) => setMatchNotifStartEnabled(e.target.checked)} 
+                        />
+                      }
+                      label={
+                        <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                          🎬 Notificar início de jogo
+                        </Typography>
+                      }
+                    />
+                    {matchNotifStartEnabled && (
+                      <TextField
+                        label="Template de início de jogo"
+                        variant="outlined"
+                        required
+                        fullWidth
+                        multiline
+                        rows={2}
+                        value={matchNotifStartTemplate}
+                        onChange={(e) => setMatchNotifStartTemplate(e.target.value)}
+                        placeholder="Ex: 🎬 Bola rolando! {{match}} começou!"
+                        sx={{ mt: 2 }}
+                        helperText="Use {{match}} para exibir o confronto (Ex: Brasil 🇧🇷 x 🇦🇷 Argentina)"
+                      />
+                    )}
+                  </Box>
+
+                  {/* Match Goal Notifications */}
+                  <Box sx={{ p: 2.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox 
+                          checked={matchNotifGoalEnabled} 
+                          onChange={(e) => setMatchNotifGoalEnabled(e.target.checked)} 
+                        />
+                      }
+                      label={
+                        <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                          ⚽ Notificar gols (Em tempo real)
+                        </Typography>
+                      }
+                    />
+                    {matchNotifGoalEnabled && (
+                      <TextField
+                        label="Template de notificação de gol"
+                        variant="outlined"
+                        required
+                        fullWidth
+                        multiline
+                        rows={2}
+                        value={matchNotifGoalTemplate}
+                        onChange={(e) => setMatchNotifGoalTemplate(e.target.value)}
+                        placeholder="Ex: ⚽ GOL! {{score}}"
+                        sx={{ mt: 2 }}
+                        helperText="Use {{score}} para exibir o placar com bandeiras e abreviações (Ex: MEX 🇲🇽2 X 1 🇿🇦RSA)"
+                      />
+                    )}
+                  </Box>
+
+                  {/* Match End Notifications */}
+                  <Box sx={{ p: 2.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox 
+                          checked={matchNotifEndEnabled} 
+                          onChange={(e) => setMatchNotifEndEnabled(e.target.checked)} 
+                        />
+                      }
+                      label={
+                        <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                          🏁 Notificar fim de jogo
+                        </Typography>
+                      }
+                    />
+                    {matchNotifEndEnabled && (
+                      <TextField
+                        label="Template de fim de jogo"
+                        variant="outlined"
+                        required
+                        fullWidth
+                        multiline
+                        rows={2}
+                        value={matchNotifEndTemplate}
+                        onChange={(e) => setMatchNotifEndTemplate(e.target.value)}
+                        placeholder="Ex: 🏁 Fim de papo! {{match}} finalizado. Placar: {{score}}"
+                        sx={{ mt: 2 }}
+                        helperText="Use {{match}} para o confronto e {{score}} para o placar"
+                      />
+                    )}
+                  </Box>
+
+                  <Button type="submit" variant="contained" color="secondary" size="large" disabled={savingMatchNotifSettings} sx={{ alignSelf: 'flex-start' }}>
+                    {savingMatchNotifSettings ? 'Salvando...' : 'Salvar Configurações de Transmissão'}
+                  </Button>
+                </Stack>
               </Box>
             </CardContent>
           </Card>

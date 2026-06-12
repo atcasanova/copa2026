@@ -439,6 +439,9 @@ def sync_finished_scores_from_football_data(
             match.score_confirmed_by_admin = False
             db.flush()
 
+            from .notifications import send_match_end_notification
+            send_match_end_notification(db, match, api_result.home_score, api_result.away_score)
+
             db.add(AuditLog(
                 user_id=None,
                 action="football_data_score_auto_update",

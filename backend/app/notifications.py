@@ -273,3 +273,68 @@ def send_general_ranking_notification(db: Session) -> bool:
         return False
     ranking = get_rankings(db)
     return send_whatsapp_message(format_ranking_message(ranking))
+
+
+def send_match_start_notification(db: Session, match: Match):
+    if not whatsapp_notifications_enabled():
+        return
+    enabled_setting = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_start_enabled").first()
+    enabled = enabled_setting.value.lower() in {"1", "true", "yes", "on"} if enabled_setting else True
+    if not enabled:
+        return
+    
+    template_setting = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_start_template").first()
+    template = template_setting.value if template_setting else "🎬 Bola rolando! {{match}} começou!"
+    
+    flag1 = match.team1.flag_icon or ""
+    flag2 = match.team2.flag_icon or ""
+    match_str = f"{match.team1_name} {flag1} x {flag2} {match.team2_name}"
+    
+    msg = template.replace("{{match}}", match_str)
+    send_whatsapp_message(msg)
+
+
+def send_match_goal_notification(db: Session, match: Match, score1: int, score2: int):
+    if not whatsapp_notifications_enabled():
+        return
+    enabled_setting = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_goal_enabled").first()
+    enabled = enabled_setting.value.lower() in {"1", "true", "yes", "on"} if enabled_setting else True
+    if not enabled:
+        return
+        
+    template_setting = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_goal_template").first()
+    template = template_setting.value if template_setting else "⚽ GOL! {{score}}"
+    
+    code1 = match.team1.fifa_code or match.team1_name[:3].upper()
+    flag1 = match.team1.flag_icon or ""
+    code2 = match.team2.fifa_code or match.team2_name[:3].upper()
+    flag2 = match.team2.flag_icon or ""
+    score_str = f"{code1} {flag1}{score1} X {score2} {flag2}{code2}"
+    
+    msg = template.replace("{{score}}", score_str)
+    send_whatsapp_message(msg)
+
+
+def send_match_end_notification(db: Session, match: Match, score1: int, score2: int):
+    if not whatsapp_notifications_enabled():
+        return
+    enabled_setting = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_end_enabled").first()
+    enabled = enabled_setting.value.lower() in {"1", "true", "yes", "on"} if enabled_setting else True
+    if not enabled:
+        return
+        
+    template_setting = db.query(SystemSetting).filter(SystemSetting.key == "whatsapp_match_end_template").first()
+    template = template_setting.value if template_setting else "🏁 Fim de papo! {{match}} finalizado. Placar: {{score}}"
+    
+    flag1 = match.team1.flag_icon or ""
+    flag2 = match.team2.flag_icon or ""
+    match_str = f"{match.team1_name} {flag1} x {flag2} {match.team2_name}"
+    
+    code1 = match.team1.fifa_code or match.team1_name[:3].upper()
+    flag1 = match.team1.flag_icon or ""
+    code2 = match.team2.fifa_code or match.team2_name[:3].upper()
+    flag2 = match.team2.flag_icon or ""
+    score_str = f"{code1} {flag1}{score1} X {score2} {flag2}{code2}"
+    
+    msg = template.replace("{{match}}", match_str).replace("{{score}}", score_str)
+    send_whatsapp_message(msg)
