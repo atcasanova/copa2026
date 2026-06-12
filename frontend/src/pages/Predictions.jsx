@@ -792,15 +792,15 @@ export default function Predictions() {
       {/* Desktop Table View */}
       <Box sx={{ display: { xs: 'none', md: 'block' } }}>
         <TableContainer component={Paper} sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
-          <Table>
+          <Table sx={{ tableLayout: 'fixed', minWidth: 800 }}>
             <TableHead>
               <TableRow>
-                <TableCell>Fase / Estádio</TableCell>
-                <TableCell>Horário (SP)</TableCell>
-                <TableCell align="right" sx={{ width: '25%' }}>Time A</TableCell>
-                <TableCell align="center" sx={{ width: '18%' }}>Palpite</TableCell>
-                <TableCell align="left" sx={{ width: '25%' }}>Time B</TableCell>
-                <TableCell align="center">Resultado / Pontuação</TableCell>
+                <TableCell sx={{ width: '18%' }}>Fase / Estádio</TableCell>
+                <TableCell sx={{ width: '14%' }}>Horário (SP)</TableCell>
+                <TableCell align="right" sx={{ width: '22%' }}>Time A</TableCell>
+                <TableCell align="center" sx={{ width: '14%' }}>Palpite</TableCell>
+                <TableCell align="left" sx={{ width: '22%' }}>Time B</TableCell>
+                <TableCell align="center" sx={{ width: '10%' }}>Resultado / Pontuação</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1246,8 +1246,8 @@ export default function Predictions() {
                       <Box sx={{ textAlign: 'right' }}>
                         {isFinished ? (
                           <Box>
-                            <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', color: 'text.primary', mb: 0.5 }}>
-                              Resultado: {match.score_ft_team1} x {match.score_ft_team2}
+                            <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', color: 'text.primary', mb: 0.5, whiteSpace: 'nowrap' }}>
+                              Final: {match.score_ft_team1}x{match.score_ft_team2}
                             </Typography>
                             {pred.points_earned !== undefined && pred.points_earned !== null ? (
                               <Chip 
