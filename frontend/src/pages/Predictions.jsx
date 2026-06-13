@@ -115,6 +115,8 @@ export default function Predictions() {
   const [broadcasts, setBroadcasts] = useState({})
   const [broadcasterModalOpen, setBroadcasterModalOpen] = useState(false)
   const [broadcasterModalMatch, setBroadcasterModalMatch] = useState(null)
+  const [glivaModalOpen, setGlivaModalOpen] = useState(false)
+  const [glivaModalData, setGlivaModalData] = useState(null)
 
   const parseApiDateTime = (value) => {
     if (!value) return new Date(NaN)
@@ -268,6 +270,26 @@ export default function Predictions() {
     }
   }
 
+  const triggerSavePrediction = (matchId, goals1, goals2, qualName) => {
+    if (goals1 === undefined || goals2 === undefined || goals1 === '' || goals2 === '') {
+      return
+    }
+
+    const g1 = parseInt(goals1)
+    const g2 = parseInt(goals2)
+
+    if ((!isNaN(g1) && g1 >= 6) || (!isNaN(g2) && g2 >= 6)) {
+      const match = matches.find(m => m.id === matchId)
+      if (match) {
+        setGlivaModalData({ matchId, goals1, goals2, qualName, match })
+        setGlivaModalOpen(true)
+        return
+      }
+    }
+
+    handleAutoSave(matchId, goals1, goals2, qualName)
+  }
+
   const handleInputChange = (matchId, field, value) => {
     // Only permit non-negative integers
     if (value !== '' && !/^\d+$/.test(value)) return
@@ -296,7 +318,7 @@ export default function Predictions() {
     // Trigger auto-save if both fields are filled (not empty)
     if (updatedPred.goals_team1 !== undefined && updatedPred.goals_team2 !== undefined &&
         updatedPred.goals_team1 !== '' && updatedPred.goals_team2 !== '') {
-      handleAutoSave(matchId, updatedPred.goals_team1, updatedPred.goals_team2, updatedPred.qualified_team_name)
+      triggerSavePrediction(matchId, updatedPred.goals_team1, updatedPred.goals_team2, updatedPred.qualified_team_name)
     }
   }
 
@@ -338,7 +360,7 @@ export default function Predictions() {
         delete next[match.id]
         return next
       })
-      handleAutoSave(match.id, finalGoals1, finalGoals2, currentPred.qualified_team_name)
+      triggerSavePrediction(match.id, finalGoals1, finalGoals2, currentPred.qualified_team_name)
     }, 1000)
   }
 
@@ -435,6 +457,24 @@ export default function Predictions() {
   const handleCloseBroadcasters = () => {
     setBroadcasterModalOpen(false)
     setBroadcasterModalMatch(null)
+  }
+
+  const handleConfirmGlivaSave = () => {
+    if (glivaModalData) {
+      handleAutoSave(
+        glivaModalData.matchId,
+        glivaModalData.goals1,
+        glivaModalData.goals2,
+        glivaModalData.qualName
+      )
+    }
+    setGlivaModalOpen(false)
+    setGlivaModalData(null)
+  }
+
+  const handleCancelGlivaSave = () => {
+    setGlivaModalOpen(false)
+    setGlivaModalData(null)
   }
 
   const renderBroadcastersButton = (match) => {
@@ -975,22 +1015,50 @@ export default function Predictions() {
                             <Box display="flex" alignItems="center" justifyContent="center" gap={1.5}>
                               <TextField
                                 size="small"
+                                type="number"
                                 disabled={locked || Boolean(luckyRolling[match.id]) || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
-                                sx={{ width: 55 }}
-                                inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem' } }}
+                                sx={{
+                                  width: 55,
+                                  '& input[type=number]': { MozAppearance: 'textfield' },
+                                  '& input[type=number]::-webkit-outer-spin-button': { WebkitAppearance: 'none', margin: 0 },
+                                  '& input[type=number]::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }
+                                }}
+                                inputProps={{
+                                  min: 0,
+                                  inputMode: 'numeric',
+                                  pattern: '[0-9]*',
+                                  style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem' }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+                                }}
                                 value={goals1}
                                 onChange={(e) => handleInputChange(match.id, 'goals_team1', e.target.value)}
-                                onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                                onBlur={() => triggerSavePrediction(match.id, goals1, goals2, pred.qualified_team_name)}
                               />
                               <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>x</Typography>
                               <TextField
                                 size="small"
+                                type="number"
                                 disabled={locked || Boolean(luckyRolling[match.id]) || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
-                                sx={{ width: 55 }}
-                                inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem' } }}
+                                sx={{
+                                  width: 55,
+                                  '& input[type=number]': { MozAppearance: 'textfield' },
+                                  '& input[type=number]::-webkit-outer-spin-button': { WebkitAppearance: 'none', margin: 0 },
+                                  '& input[type=number]::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }
+                                }}
+                                inputProps={{
+                                  min: 0,
+                                  inputMode: 'numeric',
+                                  pattern: '[0-9]*',
+                                  style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem' }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+                                }}
                                 value={goals2}
                                 onChange={(e) => handleInputChange(match.id, 'goals_team2', e.target.value)}
-                                onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                                onBlur={() => triggerSavePrediction(match.id, goals1, goals2, pred.qualified_team_name)}
                               />
                               {renderLuckyButton(match, locked)}
                             </Box>
@@ -1224,22 +1292,50 @@ export default function Predictions() {
                         <Box display="flex" alignItems="center" gap={0.5} sx={{ flexShrink: 0, px: 0.5 }}>
                           <TextField
                             size="small"
+                            type="number"
                             disabled={locked || Boolean(luckyRolling[match.id]) || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
-                            sx={{ width: 45 }}
-                            inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1rem' } }}
+                            sx={{
+                              width: 45,
+                              '& input[type=number]': { MozAppearance: 'textfield' },
+                              '& input[type=number]::-webkit-outer-spin-button': { WebkitAppearance: 'none', margin: 0 },
+                              '& input[type=number]::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }
+                            }}
+                            inputProps={{
+                              min: 0,
+                              inputMode: 'numeric',
+                              pattern: '[0-9]*',
+                              style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1rem' }
+                            }}
+                            onKeyDown={(e) => {
+                              if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+                            }}
                             value={goals1}
                             onChange={(e) => handleInputChange(match.id, 'goals_team1', e.target.value)}
-                            onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                            onBlur={() => triggerSavePrediction(match.id, goals1, goals2, pred.qualified_team_name)}
                           />
                           <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>x</Typography>
                           <TextField
                             size="small"
+                            type="number"
                             disabled={locked || Boolean(luckyRolling[match.id]) || (user?.role !== 'system_admin' && user?.role !== 'score_admin' && user?.payment_status !== 'approved')}
-                            sx={{ width: 45 }}
-                            inputProps={{ min: 0, style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1rem' } }}
+                            sx={{
+                              width: 45,
+                              '& input[type=number]': { MozAppearance: 'textfield' },
+                              '& input[type=number]::-webkit-outer-spin-button': { WebkitAppearance: 'none', margin: 0 },
+                              '& input[type=number]::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }
+                            }}
+                            inputProps={{
+                              min: 0,
+                              inputMode: 'numeric',
+                              pattern: '[0-9]*',
+                              style: { textAlign: 'center', fontWeight: 'bold', fontSize: '1rem' }
+                            }}
+                            onKeyDown={(e) => {
+                              if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+                            }}
                             value={goals2}
                             onChange={(e) => handleInputChange(match.id, 'goals_team2', e.target.value)}
-                            onBlur={() => handleAutoSave(match.id, goals1, goals2, pred.qualified_team_name)}
+                            onBlur={() => triggerSavePrediction(match.id, goals1, goals2, pred.qualified_team_name)}
                           />
                         </Box>
                       )}
@@ -1609,6 +1705,76 @@ export default function Predictions() {
         <DialogActions>
           <Button onClick={handleCloseBroadcasters} sx={{ fontWeight: 'bold' }}>
             Fechar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={glivaModalOpen}
+        onClose={handleCancelGlivaSave}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            bgcolor: 'background.paper',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            textAlign: 'center',
+            p: 2
+          }
+        }}
+      >
+        <DialogContent sx={{ pb: 2 }}>
+          <Box display="flex" justifyContent="center" sx={{ mb: 2 }}>
+            <Box
+              component="img"
+              src={glivaIcon}
+              alt="Gliva"
+              sx={{
+                width: 120,
+                height: 120,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '3px solid',
+                borderColor: 'secondary.main',
+                boxShadow: '0 4px 10px rgba(0,0,0,0.3)'
+              }}
+            />
+          </Box>
+          <Typography variant="h6" sx={{ fontFamily: 'Outfit', fontWeight: 800, color: 'text.primary', mb: 2 }}>
+            Tem certeza? 😮
+          </Typography>
+          <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 600, mb: 1 }}>
+            {glivaModalData && (() => {
+              const { match, goals1, goals2 } = glivaModalData;
+              const g1 = parseInt(goals1);
+              const g2 = parseInt(goals2);
+              if (g1 >= 6 && g2 >= 6) {
+                return `${match.team1_name} vai meter ${g1} e ${match.team2_name} vai meter ${g2} mesmo?`;
+              } else if (g1 >= 6) {
+                return `${match.team1_name} vai meter ${g1} mesmo?`;
+              } else if (g2 >= 6) {
+                return `${match.team2_name} vai meter ${g2} mesmo?`;
+              }
+              return '';
+            })()}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', gap: 1, pb: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={handleCancelGlivaSave}
+            sx={{ fontWeight: 'bold', textTransform: 'none', borderRadius: 2 }}
+          >
+            Voltar para edição
+          </Button>
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={handleConfirmGlivaSave}
+            sx={{ fontWeight: 'bold', textTransform: 'none', borderRadius: 2 }}
+          >
+            Salvar assim mesmo
           </Button>
         </DialogActions>
       </Dialog>
