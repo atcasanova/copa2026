@@ -20,6 +20,7 @@ export default function Rankings() {
   const { user } = useAuth()
   const generalTop10Ref = useRef(null)
   const lucidoTop10Ref = useRef(null)
+  const chartExportRef = useRef(null)
   const [rankingType, setRankingType] = useState('normal') // 'normal' | 'lucido'
   
   // Tabs: 0 = General, 1 = By Stage, 2 = By Date
@@ -589,7 +590,7 @@ export default function Rankings() {
       {rankingType === 'normal' && tabIndex === 0 && (
         <Card sx={{ mt: 3, mb: 3 }}>
           <CardContent sx={{ p: { xs: 2, md: 3 } }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 2 }}>
               <Box>
                 <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
                   Evolução da classificação
@@ -598,13 +599,22 @@ export default function Rankings() {
                   Posição geral por snapshot diário. A posição 1 aparece no topo.
                 </Typography>
               </Box>
-              <Typography variant="caption" color="text.secondary">
-                Padrão: você e os 5 primeiros
-              </Typography>
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ alignSelf: { xs: 'stretch', md: 'auto' } }}>
+                <Typography variant="caption" color="text.secondary">
+                  Padrão: você e os 5 primeiros
+                </Typography>
+                <ExportElementImageButton
+                  targetRef={chartExportRef}
+                  fileName="evolucao_classificacao.png"
+                  shareTitle="Evolução da Classificação"
+                  label="Compartilhar Gráfico"
+                  size="small"
+                />
+              </Stack>
             </Box>
 
             {historyLoading ? (
-              <Skeleton variant="rectangular" height={320} sx={{ borderRadius: 2 }} />
+              <Skeleton variant="rectangular" height={500} sx={{ borderRadius: 2 }} />
             ) : rankingHistory.dates.length === 0 || rankingHistory.participants.length === 0 ? (
               <Alert severity="info" sx={{ borderRadius: 2 }}>
                 Ainda não há snapshots de classificação suficientes para montar o histórico.
@@ -615,14 +625,14 @@ export default function Rankings() {
                   <Box sx={{ overflowX: 'auto', border: '1px solid #1f2937', borderRadius: 2, bgcolor: 'background.default' }}>
                     <Box
                       component="svg"
-                      viewBox="0 0 900 340"
+                      viewBox="0 0 900 500"
                       role="img"
                       aria-label="Gráfico de evolução de posições no ranking"
-                      sx={{ display: 'block', minWidth: 720, width: '100%', height: 340 }}
+                      sx={{ display: 'block', minWidth: 720, width: '100%', height: 500 }}
                     >
                       {(() => {
                         const width = 900
-                        const height = 340
+                        const height = 500
                         const padding = { top: 28, right: 28, bottom: 54, left: 54 }
                         const chartWidth = width - padding.left - padding.right
                         const chartHeight = height - padding.top - padding.bottom
@@ -698,7 +708,7 @@ export default function Rankings() {
                 </Grid>
 
                 <Grid item xs={12} lg={4}>
-                  <Box sx={{ maxHeight: 340, overflowY: 'auto', pr: 1 }}>
+                  <Box sx={{ maxHeight: 500, overflowY: 'auto', pr: 1 }}>
                     <Stack spacing={0.5}>
                       {rankingHistory.participants.map((participant, index) => (
                         <FormControlLabel
@@ -776,29 +786,169 @@ export default function Rankings() {
           </CardContent>
         </Card>
 
-        <Card ref={lucidoTop10Ref} sx={{ mt: 3 }}>
+        <Box ref={lucidoTop10Ref} sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 2, bgcolor: 'background.paper', p: 1 }}>
+          {/* Prêmio Lúcido explanation banner inside export */}
+          <Card sx={{ background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+            <CardContent sx={{ p: 3, display: 'flex', alignItems: 'center', gap: 3 }}>
+              <Box
+                component="img"
+                src={lucidoIcon}
+                alt="Prêmio Lúcido"
+                sx={{ width: 64, height: 64, objectFit: 'contain' }}
+              />
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'warning.main', mb: 0.5 }}>
+                  🤡 Prêmio Lúcido
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
+                  Homenagem especial para os participantes que mais acumularam palpites com <strong>exatamente 0 pontos</strong> durante o bolão! Apenas palpites enviados e computados são considerados (jogos sem palpite não entram na conta).
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ border: '1px solid #1f2937' }}>
+            <CardContent sx={{ p: 3 }}>
+              <Box display="flex" alignItems="center" gap={1.5} sx={{ mb: 2 }}>
+                <Box component="img" src={lucidoIcon} sx={{ width: 28, height: 28, objectFit: 'contain' }} />
+                <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+                  🤡 Prêmio Lúcido - Top 10
+                </Typography>
+              </Box>
+              <TableContainer component={Paper} sx={{ boxShadow: 'none', borderRadius: 2 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
+                      <TableCell>Participante</TableCell>
+                      <TableCell align="center">Palpites com 0 Pts</TableCell>
+                      <TableCell align="center">Diferença de Gols</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {renderLucidoRankingRows(rankingData.slice(0, 10), { isExport: true })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        </Box>
+
+        <Card ref={chartExportRef} sx={{ mt: 3, bgcolor: '#0b0f19', color: 'text.primary', border: '1px solid #1f2937' }}>
           <CardContent sx={{ p: 3 }}>
-            <Box display="flex" alignItems="center" gap={1.5} sx={{ mb: 2 }}>
-              <Box component="img" src={lucidoIcon} sx={{ width: 28, height: 28, objectFit: 'contain' }} />
-              <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
-                🤡 Prêmio Lúcido - Top 10
-              </Typography>
-            </Box>
-            <TableContainer component={Paper} sx={{ boxShadow: 'none', borderRadius: 2 }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
-                    <TableCell>Participante</TableCell>
-                    <TableCell align="center">Palpites com 0 Pts</TableCell>
-                    <TableCell align="center">Diferença de Gols</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {renderLucidoRankingRows(rankingData.slice(0, 10), { isExport: true })}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', mb: 2 }}>
+              📈 Evolução da Classificação
+            </Typography>
+            {rankingHistory.dates.length > 0 && (
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={8.5}>
+                  <Box
+                    component="svg"
+                    viewBox="0 0 900 500"
+                    role="img"
+                    aria-label="Gráfico de evolução de posições"
+                    sx={{ display: 'block', width: '100%', height: 'auto', bgcolor: '#0b0f19' }}
+                  >
+                    {(() => {
+                      const width = 900
+                      const height = 500
+                      const padding = { top: 28, right: 28, bottom: 54, left: 54 }
+                      const chartWidth = width - padding.left - padding.right
+                      const chartHeight = height - padding.top - padding.bottom
+                      const yTicks = Array.from(
+                        new Set([1, Math.ceil(maxChartPosition / 2), maxChartPosition].filter(value => value >= 1))
+                      )
+
+                      return (
+                        <>
+                          <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#374151" />
+                          <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#374151" />
+
+                          {yTicks.map(position => {
+                            const y = padding.top + ((position - 1) / Math.max(1, maxChartPosition - 1)) * chartHeight
+                            return (
+                              <g key={position}>
+                                <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="#1f2937" strokeDasharray="4 6" />
+                                <text x={padding.left - 10} y={y + 4} textAnchor="end" fill="#9ca3af" fontSize="12">
+                                  {position}º
+                                </text>
+                              </g>
+                            )
+                          })}
+
+                          {rankingHistory.dates.map((date, index) => {
+                            const x = rankingHistory.dates.length === 1
+                              ? width / 2
+                              : padding.left + (index / (rankingHistory.dates.length - 1)) * chartWidth
+                            return (
+                              <g key={date}>
+                                <line x1={x} y1={padding.top} x2={x} y2={height - padding.bottom} stroke="#111827" />
+                                <text x={x} y={height - 20} textAnchor="middle" fill="#9ca3af" fontSize="12">
+                                  {formatChartDate(date)}
+                                </text>
+                              </g>
+                            )
+                          })}
+
+                          {chartParticipants.map((participant) => {
+                            const color = getChartColor(rankingHistory.participants.findIndex(item => item.user_id === participant.user_id))
+                            const points = getParticipantPoints(participant, width, height, padding)
+                            return (
+                              <g key={participant.user_id}>
+                                <path
+                                  d={getParticipantPath(participant, width, height, padding)}
+                                  fill="none"
+                                  stroke={color}
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                {points.map(point => (
+                                  <circle
+                                    key={`${participant.user_id}-${point.date}`}
+                                    cx={point.x}
+                                    cy={point.y}
+                                    r="4.5"
+                                    fill={color}
+                                    stroke="#0b0f19"
+                                    strokeWidth="2"
+                                  />
+                                ))}
+                              </g>
+                            )
+                          })}
+                        </>
+                      )
+                    })()}
+                  </Box>
+                </Grid>
+
+                <Grid item xs={3.5}>
+                  <Box sx={{ borderLeft: '1px solid #1f2937', pl: 2, py: 1 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'text.secondary', fontFamily: 'Outfit' }}>
+                      Legenda
+                    </Typography>
+                    <Stack spacing={1}>
+                      {chartParticipants.map((participant) => {
+                        const globalIndex = rankingHistory.participants.findIndex(item => item.user_id === participant.user_id)
+                        const color = getChartColor(globalIndex)
+                        return (
+                          <Box key={participant.user_id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+                            <Avatar src={participant.avatar_url || ''} sx={{ width: 22, height: 22, fontSize: 12 }}>
+                              {participant.display_name.charAt(0).toUpperCase()}
+                            </Avatar>
+                            <Typography variant="caption" noWrap sx={{ fontWeight: 600, color: 'text.primary' }}>
+                              {participant.display_name}
+                            </Typography>
+                          </Box>
+                        )
+                      })}
+                    </Stack>
+                  </Box>
+                </Grid>
+              </Grid>
+            )}
           </CardContent>
         </Card>
       </Box>
