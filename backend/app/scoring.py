@@ -507,3 +507,91 @@ def map_round_to_stage(round_str: str) -> str:
     elif "final" in r or "third" in r:
         return "Final"
     return "Group Stage"
+
+def get_lucido_ranking(db: Session, group_id: str = None) -> list[dict]:
+    # Determine cache key
+    if group_id:
+        cache_key = f"lucido_group_{group_id}"
+    else:
+        cache_key = "lucido_general"
+
+    # Serve from cache if available
+    try:
+        cached = db.query(RankingCache).filter(RankingCache.key == cache_key).first()
+        if cached:
+            return cached.data
+    except Exception:
+        pass
+
+    # Import get_rankable_match_ids locally to avoid circular dependency
+    from .scoring import get_rankable_match_ids
+    ranked_match_ids = get_rankable_match_ids(db)
+
+    # Base query for users
+    users_query = db.query(User).filter(
+        User.is_active == True,
+        User.role.notin_(["system_admin", "score_admin"]),
+        User.payment_status == "approved"
+    )
+    if group_id:
+        from .models import GroupMember
+        users_query = users_query.join(GroupMember, GroupMember.user_id == User.id)\
+                                 .filter(GroupMember.group_id == group_id, GroupMember.is_approved == True)
+
+    users = users_query.all()
+    ranking_list = []
+
+    for user in users:
+        zero_points_count = 0
+        if ranked_match_ids:
+            zero_points_count = db.query(Prediction).filter(
+                Prediction.user_id == user.id,
+                Prediction.match_id.in_(ranked_match_ids),
+                Prediction.points_earned == 0
+            ).count()
+
+        ranking_list.append({
+            "user_id": user.id,
+            "display_name": user.display_name,
+            "avatar_url": user.avatar_url,
+            "zero_points_count": zero_points_count,
+            "registration_date": user.created_at
+        })
+
+    def sort_key(row):
+        return (
+            -row["zero_points_count"],
+            row["registration_date"].timestamp(),
+            row["display_name"].lower()
+        )
+
+    ranking_list.sort(key=sort_key)
+
+    # Assign positions
+    for idx, row in enumerate(ranking_list):
+        row["position"] = idx + 1
+
+    # Save to cache
+    try:
+        serialized = []
+        for r in ranking_list:
+            serialized.append({
+                "user_id": str(r["user_id"]),
+                "display_name": r["display_name"],
+                "avatar_url": r["avatar_url"],
+                "zero_points_count": r["zero_points_count"],
+                "position": r["position"]
+            })
+        cache_entry = db.query(RankingCache).filter(RankingCache.key == cache_key).first()
+        if not cache_entry:
+            cache_entry = RankingCache(key=cache_key, data=serialized)
+            db.add(cache_entry)
+        else:
+            cache_entry.data = serialized
+            cache_entry.updated_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return ranking_list
+

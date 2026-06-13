@@ -250,6 +250,16 @@ class RankingRowResponse(BaseModel):
     previous_position: Optional[int] = None
     position_change: Optional[int] = None
 
+class LucidoRankingRowResponse(BaseModel):
+    position: int
+    user_id: UUID
+    display_name: str
+    avatar_url: Optional[str] = None
+    zero_points_count: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 # Stage Multiplier Schemas
 class StageMultiplierResponse(BaseModel):
     stage: str

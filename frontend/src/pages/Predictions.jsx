@@ -1518,6 +1518,11 @@ export default function Predictions() {
                           size="small"
                           sx={{ fontWeight: 900, fontFamily: 'Outfit' }}
                         />
+                        {group.points === 0 && (
+                          <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'warning.main', ml: 0.5, fontFamily: 'Outfit' }}>
+                            🤡 Prêmio Lúcido
+                          </Typography>
+                        )}
                         <Typography variant="caption" color="text.secondary">
                           {group.entries.length} {group.entries.length === 1 ? 'palpiteiro' : 'palpiteiros'}
                         </Typography>

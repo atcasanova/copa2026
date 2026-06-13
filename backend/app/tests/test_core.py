@@ -908,3 +908,87 @@ def test_ranking_cache_flow(client, db_session, test_users):
     res3 = client.get("/api/rankings/general", headers=headers)
     assert res3.status_code == 200
     assert db_session.query(RankingCache).filter(RankingCache.key == "general").count() == 1
+
+
+def test_lucido_ranking_flow(client, db_session, test_users):
+    # Ana and Bruno are test_users[2] and test_users[3]
+    ana = test_users[2]
+    bruno = test_users[3]
+    
+    # 1. Setup teams, stadium & match
+    t1 = Team(name="Argentina", group_name="C")
+    t2 = Team(name="Saudi Arabia", group_name="C")
+    stad = Stadium(name="Lusail Stadium", city="Lusail", timezone="UTC")
+    db_session.add_all([t1, t2, stad])
+    db_session.commit()
+    
+    match = Match(
+        round="Matchday 1",
+        stage="Group Stage",
+        date="2026-06-12",
+        time_str="13:00 UTC+0",
+        kickoff_time=datetime(2026, 6, 12, 13, 0),
+        team1_name="Argentina",
+        team2_name="Saudi Arabia",
+        ground="Lusail Stadium",
+        score_ft_team1=1,
+        score_ft_team2=2,
+        status="finished"
+    )
+    db_session.add(match)
+    db_session.commit()
+
+    # 2. Ana predicts 2x0 (Saudi Arabia wins 2-1 in reality, so Ana got the score/result wrong). Points earned: 0.
+    pred_ana = Prediction(
+        match_id=match.id,
+        user_id=ana.id,
+        goals_team1=2,
+        goals_team2=0,
+        points_earned=0,
+        base_points=0
+    )
+    # Bruno predicts 1x2 (exact match). Points earned: 10.
+    pred_bruno = Prediction(
+        match_id=match.id,
+        user_id=bruno.id,
+        goals_team1=1,
+        goals_team2=2,
+        points_earned=10,
+        base_points=10
+    )
+    db_session.add_all([pred_ana, pred_bruno])
+    db_session.commit()
+
+    # 3. Retrieve Premio Lucido ranking
+    from app.scoring import get_lucido_ranking
+    rank = get_lucido_ranking(db_session)
+
+    # Ana must be first, Bruno second.
+    ana_rank = next(r for r in rank if r["user_id"] == ana.id)
+    bruno_rank = next(r for r in rank if r["user_id"] == bruno.id)
+
+    assert ana_rank["zero_points_count"] == 1
+    assert bruno_rank["zero_points_count"] == 0
+    assert ana_rank["position"] < bruno_rank["position"]
+
+    # 4. Check cache functionality
+    from app.models import RankingCache
+    # Ensure cache is now created for lucido_general
+    assert db_session.query(RankingCache).filter(RankingCache.key == "lucido_general").count() == 1
+
+    # Login p1 to query endpoints
+    login_res = client.post("/api/auth/login", data={"username": "p1_user", "password": "password"})
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.get("/api/rankings/lucido/general", headers=headers)
+    assert res.status_code == 200
+    res_data = res.json()
+    assert len(res_data) > 0
+    # The first one in the response should be Ana
+    assert res_data[0]["user_id"] == str(ana.id)
+    assert res_data[0]["zero_points_count"] == 1
+
+    # 5. Check cache invalidation
+    invalidate_ranking_cache(db_session)
+    assert db_session.query(RankingCache).filter(RankingCache.key == "lucido_general").count() == 0

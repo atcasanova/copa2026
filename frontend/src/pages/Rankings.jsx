@@ -14,10 +14,13 @@ import {
 import axios from 'axios'
 import { useAuth } from '../App'
 import ExportElementImageButton from '../components/ExportElementImageButton'
+import lucidoIcon from '../assets/lucido.png'
 
 export default function Rankings() {
   const { user } = useAuth()
   const generalTop10Ref = useRef(null)
+  const lucidoTop10Ref = useRef(null)
+  const [rankingType, setRankingType] = useState('normal') // 'normal' | 'lucido'
   
   // Tabs: 0 = General, 1 = By Stage, 2 = By Date
   const [tabIndex, setTabIndex] = useState(0)
@@ -61,10 +64,14 @@ export default function Rankings() {
       setError('')
       let endpoint = '/api/rankings/general'
       
-      if (tabIndex === 1 && selectedStage) {
-        endpoint = `/api/rankings/stage?stage=${encodeURIComponent(selectedStage)}`
-      } else if (tabIndex === 2 && selectedDate) {
-        endpoint = `/api/rankings/date?date=${selectedDate}`
+      if (rankingType === 'lucido') {
+        endpoint = '/api/rankings/lucido/general'
+      } else {
+        if (tabIndex === 1 && selectedStage) {
+          endpoint = `/api/rankings/stage?stage=${encodeURIComponent(selectedStage)}`
+        } else if (tabIndex === 2 && selectedDate) {
+          endpoint = `/api/rankings/date?date=${selectedDate}`
+        }
       }
       
       const res = await axios.get(endpoint)
@@ -111,7 +118,7 @@ export default function Rankings() {
 
   useEffect(() => {
     loadRanking()
-  }, [tabIndex, selectedStage, selectedDate])
+  }, [tabIndex, selectedStage, selectedDate, rankingType])
 
   const handleTabChange = (event, newIndex) => {
     setTabIndex(newIndex)
@@ -257,6 +264,78 @@ export default function Rankings() {
     })
   )
 
+  const renderLucidoRankingRows = (rows, { isExport = false } = {}) => (
+    rows.map((row) => {
+      const isMe = row.user_id === user?.id
+      return (
+        <TableRow
+          key={row.user_id}
+          sx={{
+            bgcolor: isMe ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+            borderLeft: isMe ? '4px solid #10b981' : 'none',
+            '&:hover': { bgcolor: isMe ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.01)' }
+          }}
+        >
+          <TableCell align="center" sx={{ fontWeight: 800 }}>
+            {row.position === 1 ? (
+              <Typography sx={{ color: 'secondary.main', fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                🤡 1º
+              </Typography>
+            ) : row.position === 2 ? (
+              <Typography sx={{ color: 'text.primary', fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                🥈 2º
+              </Typography>
+            ) : row.position === 3 ? (
+              <Typography sx={{ color: '#cd7f32', fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                🥉 3º
+              </Typography>
+            ) : (
+              <Typography sx={{ fontWeight: 900 }}>{row.position}º</Typography>
+            )}
+          </TableCell>
+
+          <TableCell>
+            <Box display="flex" alignItems="center" gap={2}>
+              <Avatar
+                src={row.avatar_url || ''}
+                alt={row.display_name}
+                sx={{ width: 32, height: 32, bgcolor: isMe ? 'primary.main' : '#374151', fontSize: '0.85rem', fontWeight: 'bold' }}
+              >
+                {row.display_name.charAt(0).toUpperCase()}
+              </Avatar>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {row.position <= 3 && (
+                  <Tooltip title={`Top 3 Palpitador Lúcido (${row.position}º lugar)`}>
+                    <Box
+                      component="img"
+                      src={lucidoIcon}
+                      alt="Lúcido"
+                      sx={{
+                        height: 22,
+                        width: 22,
+                        objectFit: 'contain',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s',
+                        '&:hover': { transform: 'scale(1.25)' }
+                      }}
+                    />
+                  </Tooltip>
+                )}
+                <Typography sx={{ fontWeight: isMe ? 700 : 500 }}>
+                  {row.display_name} {isMe && '(Você)'}
+                </Typography>
+              </Box>
+            </Box>
+          </TableCell>
+
+          <TableCell align="center" sx={{ fontWeight: 800, color: 'warning.light', fontSize: '1.05rem' }}>
+            {row.zero_points_count}
+          </TableCell>
+        </TableRow>
+      )
+    })
+  )
+
   const chartParticipants = rankingHistory.participants.filter(participant => selectedChartUsers[participant.user_id])
   const maxChartPosition = Math.max(
     1,
@@ -312,33 +391,82 @@ export default function Rankings() {
 
       {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
 
-      {tabIndex === 0 && rankingData.length > 0 && !loading && (
+      {/* Top level toggle tabs for Normal vs Lucido */}
+      <Tabs 
+        value={rankingType} 
+        onChange={(e, val) => setRankingType(val)}
+        textColor="secondary"
+        indicatorColor="secondary"
+        sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}
+      >
+        <Tab label="Classificação Geral" value="normal" sx={{ fontWeight: 'bold', fontFamily: 'Outfit' }} />
+        <Tab label="Prêmio Lúcido 🤡" value="lucido" sx={{ fontWeight: 'bold', fontFamily: 'Outfit' }} />
+      </Tabs>
+
+      {/* Export Button */}
+      {rankingData.length > 0 && !loading && (
         <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' }, mb: 2 }}>
-          <ExportElementImageButton
-            targetRef={generalTop10Ref}
-            fileName="ranking_geral_top_10.png"
-            shareTitle="Ranking Geral - Top 10"
-            label="Compartilhar Top 10"
-            fullWidth={false}
-          />
+          {rankingType === 'normal' ? (
+            tabIndex === 0 && (
+              <ExportElementImageButton
+                targetRef={generalTop10Ref}
+                fileName="ranking_geral_top_10.png"
+                shareTitle="Ranking Geral - Top 10"
+                label="Compartilhar Top 10"
+                fullWidth={false}
+              />
+            )
+          ) : (
+            <ExportElementImageButton
+              targetRef={lucidoTop10Ref}
+              fileName="ranking_premio_lucido_top_10.png"
+              shareTitle="Prêmio Lúcido - Top 10"
+              label="Compartilhar Top 10"
+              fullWidth={false}
+            />
+          )}
         </Box>
       )}
 
-      {/* Tabs Selector */}
-      <Tabs 
-        value={tabIndex} 
-        onChange={handleTabChange} 
-        textColor="primary"
-        indicatorColor="primary"
-        sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}
-      >
-        <Tab label="Geral" sx={{ fontWeight: 'bold' }} />
-        <Tab label="Por Fase do Torneio" sx={{ fontWeight: 'bold' }} />
-        <Tab label="Por Dia (Data)" sx={{ fontWeight: 'bold' }} />
-      </Tabs>
+      {/* Prêmio Lúcido Banner */}
+      {rankingType === 'lucido' && (
+        <Card sx={{ mb: 3, background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+          <CardContent sx={{ p: 3, display: 'flex', alignItems: 'center', gap: 3, flexDirection: { xs: 'column', sm: 'row' } }}>
+            <Box
+              component="img"
+              src={lucidoIcon}
+              alt="Prêmio Lúcido"
+              sx={{ width: 80, height: 80, objectFit: 'contain' }}
+            />
+            <Box sx={{ textAlign: { xs: 'center', sm: 'left' } }}>
+              <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'warning.main', mb: 0.5 }}>
+                🤡 Prêmio Lúcido
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 600 }}>
+                Homenagem especial para os participantes que mais acumularam palpites com <strong>exatamente 0 pontos</strong> durante o bolão! Apenas palpites enviados e computados são considerados (jogos sem palpite não entram na conta).
+              </Typography>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Filters Area depending on Tab */}
-      {tabIndex === 1 && (
+      {/* Tabs Selector for Normal view */}
+      {rankingType === 'normal' && (
+        <Tabs 
+          value={tabIndex} 
+          onChange={handleTabChange} 
+          textColor="primary"
+          indicatorColor="primary"
+          sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}
+        >
+          <Tab label="Geral" sx={{ fontWeight: 'bold' }} />
+          <Tab label="Por Fase do Torneio" sx={{ fontWeight: 'bold' }} />
+          <Tab label="Por Dia (Data)" sx={{ fontWeight: 'bold' }} />
+        </Tabs>
+      )}
+
+      {/* Filters Area depending on Tab for Normal view */}
+      {rankingType === 'normal' && tabIndex === 1 && (
         <Card sx={{ mb: 3 }}>
           <CardContent sx={{ p: 2 }}>
             <FormControl size="small" sx={{ minWidth: 250 }}>
@@ -359,7 +487,7 @@ export default function Rankings() {
         </Card>
       )}
 
-      {tabIndex === 2 && (
+      {rankingType === 'normal' && tabIndex === 2 && (
         <Card sx={{ mb: 3 }}>
           <CardContent sx={{ p: 2 }}>
             <FormControl size="small" sx={{ minWidth: 250 }}>
@@ -384,27 +512,35 @@ export default function Rankings() {
       <TableContainer component={Paper} sx={{ borderRadius: 3, overflowX: 'auto' }}>
         <Table>
           <TableHead>
-            <TableRow>
-              <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
-              <TableCell>Participante</TableCell>
-              <TableCell align="center">Pts Totais</TableCell>
-              <TableCell align="center">
-                <Box display="inline-flex" alignItems="center" gap={0.5}>
-                  Placar Exato (10)
-                  <Tooltip title="Número de palpites com placar 100% correto (10 pontos)">
-                    <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
-                  </Tooltip>
-                </Box>
-              </TableCell>
-              <TableCell align="center">
-                <Box display="inline-flex" alignItems="center" gap={0.5}>
-                  Resultado Certo (3/4/6)
-                  <Tooltip title="Número de palpites com vencedor ou empate correto (3, 4 ou 6 pontos)">
-                    <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
-                  </Tooltip>
-                </Box>
-              </TableCell>
-            </TableRow>
+            {rankingType === 'normal' ? (
+              <TableRow>
+                <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
+                <TableCell>Participante</TableCell>
+                <TableCell align="center">Pts Totais</TableCell>
+                <TableCell align="center">
+                  <Box display="inline-flex" alignItems="center" gap={0.5}>
+                    Placar Exato (10)
+                    <Tooltip title="Número de palpites com placar 100% correto (10 pontos)">
+                      <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
+                    </Tooltip>
+                  </Box>
+                </TableCell>
+                <TableCell align="center">
+                  <Box display="inline-flex" alignItems="center" gap={0.5}>
+                    Resultado Certo (3/4/6)
+                    <Tooltip title="Número de palpites com vencedor ou empate correto (3, 4 ou 6 pontos)">
+                      <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
+                    </Tooltip>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ) : (
+              <TableRow>
+                <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
+                <TableCell>Participante</TableCell>
+                <TableCell align="center">Palpites com 0 Pts</TableCell>
+              </TableRow>
+            )}
           </TableHead>
           <TableBody>
             {loading ? (
@@ -419,24 +555,26 @@ export default function Rankings() {
                     </Box>
                   </TableCell>
                   <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
+                  {rankingType === 'normal' && <TableCell align="center"><Skeleton variant="text" /></TableCell>}
+                  {rankingType === 'normal' && <TableCell align="center"><Skeleton variant="text" /></TableCell>}
                 </TableRow>
               ))
             ) : rankingData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={rankingType === 'normal' ? 5 : 3} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   Nenhum usuário classificado para esta visualização.
                 </TableCell>
               </TableRow>
-            ) : (
+            ) : rankingType === 'normal' ? (
               renderRankingRows(rankingData)
+            ) : (
+              renderLucidoRankingRows(rankingData)
             )}
           </TableBody>
         </Table>
       </TableContainer>
 
-      {tabIndex === 0 && (
+      {rankingType === 'normal' && tabIndex === 0 && (
         <Card sx={{ mt: 3, mb: 3 }}>
           <CardContent sx={{ p: { xs: 2, md: 3 } }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 2 }}>
@@ -620,6 +758,31 @@ export default function Rankings() {
                 </TableHead>
                 <TableBody>
                   {renderRankingRows(rankingData.slice(0, 10), { showTieBreakerHelp: false })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+
+        <Card ref={lucidoTop10Ref} sx={{ mt: 3 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box display="flex" alignItems="center" gap={1.5} sx={{ mb: 2 }}>
+              <Box component="img" src={lucidoIcon} sx={{ width: 28, height: 28, objectFit: 'contain' }} />
+              <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit' }}>
+                🤡 Prêmio Lúcido - Top 10
+              </Typography>
+            </Box>
+            <TableContainer component={Paper} sx={{ boxShadow: 'none', borderRadius: 2 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
+                    <TableCell>Participante</TableCell>
+                    <TableCell align="center">Palpites com 0 Pts</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {renderLucidoRankingRows(rankingData.slice(0, 10), { isExport: true })}
                 </TableBody>
               </Table>
             </TableContainer>

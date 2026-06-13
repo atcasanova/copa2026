@@ -5,8 +5,8 @@ from uuid import UUID
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from ..db import get_db
-from ..scoring import get_rankings
-from ..schemas import RankingRowResponse
+from ..scoring import get_rankings, get_lucido_ranking
+from ..schemas import RankingRowResponse, LucidoRankingRowResponse
 from ..auth import get_current_active_user
 from ..models import Group, GroupMember, RankingSnapshot
 
@@ -41,6 +41,35 @@ def get_group_ranking(
             raise HTTPException(status_code=403, detail="Acesso negado: Este é um grupo privado.")
             
     return get_rankings(db, group_id=group_id)
+
+@router.get("/lucido/general", response_model=List[LucidoRankingRowResponse])
+def get_lucido_general_ranking(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    return get_lucido_ranking(db)
+
+@router.get("/lucido/group/{group_id}", response_model=List[LucidoRankingRowResponse])
+def get_lucido_group_ranking(
+    group_id: UUID,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    # Security check: If private group, user must be a member
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Grupo não encontrado.")
+        
+    if group.is_private:
+        membership = db.query(GroupMember).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == current_user.id,
+            GroupMember.is_approved == True
+        ).first()
+        if not membership:
+            raise HTTPException(status_code=403, detail="Acesso negado: Este é um grupo privado.")
+            
+    return get_lucido_ranking(db, group_id=group_id)
 
 @router.get("/stage", response_model=List[RankingRowResponse])
 def get_stage_ranking(
