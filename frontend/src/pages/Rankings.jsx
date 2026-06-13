@@ -150,8 +150,8 @@ export default function Rankings() {
       color: gained ? '#22c55e' : '#ef4444',
       icon: gained ? <ArrowUpward sx={{ fontSize: 15 }} /> : <ArrowDownward sx={{ fontSize: 15 }} />,
       label: gained
-        ? `Ganhou ${amount} posição${amount === 1 ? '' : 'ões'} desde o último ranking`
-        : `Perdeu ${amount} posição${amount === 1 ? '' : 'ões'} desde o último ranking`
+        ? `Ganhou ${amount} ${amount === 1 ? 'posição' : 'posições'} desde o último ranking`
+        : `Perdeu ${amount} ${amount === 1 ? 'posição' : 'posições'} desde o último ranking`
     }
   }
 

@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, Depends
+import httpx
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import logging
@@ -185,3 +186,74 @@ def read_root():
         "version": "1.0.0",
         "documentation": "/docs"
     }
+
+@app.get("/api/proxy-image")
+async def proxy_image(url: str):
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme")
+    
+    # 1. SSRF prevention: Validate hostname and check that IP is not loopback/private/link-local
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            raise HTTPException(status_code=400, detail="Invalid hostname")
+        
+        # Resolve hostname to check IPs
+        ips = socket.getaddrinfo(hostname, None)
+        for ip_info in ips:
+            ip_str = ip_info[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast:
+                raise HTTPException(status_code=403, detail="Access to private/local networks is forbidden")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to validate URL: {str(e)}")
+
+    # 2. Resource exhaustion & Content-type validation
+    try:
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", url, timeout=5.0, follow_redirects=True) as response:
+                if response.status_code != 200:
+                    raise HTTPException(status_code=response.status_code, detail="Failed to fetch image")
+                
+                content_type = response.headers.get("content-type", "")
+                if not content_type.startswith("image/"):
+                    raise HTTPException(status_code=400, detail="URL does not point to an image")
+                
+                # Check content length header if present (limit to 5MB)
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    try:
+                        if int(content_length) > 5 * 1024 * 1024:
+                            raise HTTPException(status_code=400, detail="Image size exceeds 5MB limit")
+                    except ValueError:
+                        pass
+                
+                # Stream the content in chunks to enforce size limit dynamically
+                chunks = []
+                bytes_downloaded = 0
+                async for chunk in response.aiter_bytes():
+                    bytes_downloaded += len(chunk)
+                    if bytes_downloaded > 5 * 1024 * 1024:
+                        raise HTTPException(status_code=400, detail="Image size exceeds 5MB limit")
+                    chunks.append(chunk)
+                
+                return Response(
+                    content=b"".join(chunks),
+                    media_type=content_type,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=86400"
+                    }
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error proxying image {url}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to proxy image: {str(e)}")
