@@ -1018,10 +1018,10 @@ export default function Predictions() {
                                 Ao Vivo ({match.live_minute || "0'"})
                               </Typography>
                             </Box>
-                            <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '1.1rem', color: 'text.primary' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '1.1rem', color: 'text.primary', whiteSpace: 'nowrap' }}>
                               {match.score_ft_team1} x {match.score_ft_team2}
                             </Typography>
-                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
                               Meu palpite: <strong style={{ color: '#93c5fd' }}>{goals1 !== '' ? `${goals1} x ${goals2}` : 'Sem palpite'}</strong>
                             </Typography>
                           </Stack>
@@ -1031,7 +1031,19 @@ export default function Predictions() {
                               label={`${goals1} x ${goals2}`} 
                               color="primary" 
                               variant="outlined" 
-                              sx={{ fontWeight: 'bold', fontFamily: 'Outfit', fontSize: '1rem', px: 1 }} 
+                              sx={{ 
+                                fontWeight: 'bold', 
+                                fontFamily: 'Outfit', 
+                                fontSize: '1rem', 
+                                px: 1, 
+                                flexShrink: 0, 
+                                minWidth: 75,
+                                '& .MuiChip-label': {
+                                  overflow: 'visible',
+                                  textOverflow: 'clip',
+                                  whiteSpace: 'nowrap'
+                                }
+                              }} 
                             />
                           ) : (
                             <Chip 
@@ -1264,7 +1276,7 @@ export default function Predictions() {
                             Ao Vivo ({match.live_minute || "0'"})
                           </Typography>
                         </Box>
-                        <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'text.primary', mt: 0.5 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: 'Outfit', color: 'text.primary', mt: 0.5, whiteSpace: 'nowrap' }}>
                           {match.score_ft_team1} x {match.score_ft_team2}
                         </Typography>
                       </Box>
@@ -1310,7 +1322,17 @@ export default function Predictions() {
                               color="primary" 
                               variant="outlined" 
                               size="small"
-                              sx={{ fontWeight: 'bold', fontFamily: 'Outfit' }} 
+                              sx={{ 
+                                fontWeight: 'bold', 
+                                fontFamily: 'Outfit', 
+                                flexShrink: 0, 
+                                minWidth: 65,
+                                '& .MuiChip-label': {
+                                  overflow: 'visible',
+                                  textOverflow: 'clip',
+                                  whiteSpace: 'nowrap'
+                                }
+                              }} 
                             />
                           ) : (
                             <Chip 
