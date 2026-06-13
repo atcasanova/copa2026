@@ -11,7 +11,8 @@ import {
   CheckCircle as CheckIcon,
   HourglassEmpty as PendingIcon,
   ErrorOutline as WarningIcon,
-  Article as ReportIcon
+  Article as ReportIcon,
+  Tv as TvIcon
 } from '@mui/icons-material'
 import axios from 'axios'
 import { useAuth } from '../App'
@@ -111,6 +112,9 @@ export default function Predictions() {
   const [predictionListLoading, setPredictionListLoading] = useState(false)
   const [predictionListError, setPredictionListError] = useState('')
   const [luckyRolling, setLuckyRolling] = useState({})
+  const [broadcasts, setBroadcasts] = useState({})
+  const [broadcasterModalOpen, setBroadcasterModalOpen] = useState(false)
+  const [broadcasterModalMatch, setBroadcasterModalMatch] = useState(null)
 
   const parseApiDateTime = (value) => {
     if (!value) return new Date(NaN)
@@ -202,6 +206,15 @@ export default function Predictions() {
         setPredictionStats(statsMap)
       } catch (err) {
         setPredictionStats({})
+      }
+
+      // Load broadcaster info
+      try {
+        const broadcastsRes = await axios.get('/api/matches/broadcasts')
+        setBroadcasts(broadcastsRes.data || {})
+      } catch (err) {
+        console.error('Erro ao carregar transmissões:', err)
+        setBroadcasts({})
       }
 
       // Auto-select page on load
@@ -413,6 +426,33 @@ export default function Predictions() {
       </IconButton>
     </Tooltip>
   )
+
+  const handleOpenBroadcasters = (match) => {
+    setBroadcasterModalMatch(match)
+    setBroadcasterModalOpen(true)
+  }
+
+  const handleCloseBroadcasters = () => {
+    setBroadcasterModalOpen(false)
+    setBroadcasterModalMatch(null)
+  }
+
+  const renderBroadcastersButton = (match) => {
+    const matchBroadcasts = broadcasts[match.id] || []
+    const hasBroadcasts = matchBroadcasts.length > 0
+    return (
+      <Tooltip title="Onde assistir este jogo">
+        <IconButton
+          size="small"
+          color={hasBroadcasts ? "secondary" : "default"}
+          onClick={() => handleOpenBroadcasters(match)}
+          aria-label="Onde assistir este jogo"
+        >
+          <TvIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )
+  }
 
   const getMatchStats = (matchId) => predictionStats[matchId] || null
 
@@ -844,8 +884,9 @@ export default function Predictions() {
                         <Typography variant="caption" color="text.secondary">
                           📍 {match.ground}
                         </Typography>
-                        <Box sx={{ mt: 0.5 }}>
+                        <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, alignItems: 'center' }}>
                           {renderPredictionListButton(match, locked)}
+                          {renderBroadcastersButton(match)}
                         </Box>
                       </TableCell>
 
@@ -1099,6 +1140,7 @@ export default function Predictions() {
                       </Box>
                       <Stack direction="row" spacing={0.5} alignItems="center">
                         {renderPredictionListButton(match, locked)}
+                        {renderBroadcastersButton(match)}
                         {soon && !locked && (
                           <Chip label="Bloqueia logo" color="warning" size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
                         )}
@@ -1467,6 +1509,107 @@ export default function Predictions() {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClosePredictionList}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={broadcasterModalOpen}
+        onClose={handleCloseBroadcasters}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            bgcolor: 'background.paper',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          }
+        }}
+      >
+        <DialogTitle sx={{ pb: 1, fontWeight: 'bold', fontFamily: 'Outfit', textAlign: 'center' }}>
+          📺 Onde Assistir
+        </DialogTitle>
+        <DialogContent sx={{ pb: 3 }}>
+          {broadcasterModalMatch && (
+            <Box>
+              <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
+                {broadcasterModalMatch.team1_name} x {broadcasterModalMatch.team2_name}
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              {broadcasts[broadcasterModalMatch.id] && broadcasts[broadcasterModalMatch.id].length > 0 ? (
+                <Stack spacing={2} sx={{ mt: 1 }}>
+                  {broadcasts[broadcasterModalMatch.id].map((b, idx) => (
+                    <Box
+                      key={idx}
+                      display="flex"
+                      alignItems="center"
+                      gap={2}
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 2,
+                        bgcolor: 'background.default',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.02)',
+                          borderColor: 'primary.main',
+                        }
+                      }}
+                    >
+                      {b.logo ? (
+                        <Box
+                          component="img"
+                          src={b.logo}
+                          alt={b.name}
+                          sx={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: '50%',
+                            objectFit: 'contain',
+                            bgcolor: 'white',
+                            p: 0.5,
+                            border: '1px solid',
+                            borderColor: 'divider'
+                          }}
+                        />
+                      ) : (
+                        <Box
+                          sx={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            bgcolor: 'primary.main',
+                            color: 'primary.contrastText',
+                            fontWeight: 'bold',
+                            fontSize: '1rem'
+                          }}
+                        >
+                          {b.name.charAt(0)}
+                        </Box>
+                      )}
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                        {b.name}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <Box sx={{ py: 3, textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    As transmissões oficiais para esta partida ainda não foram confirmadas. Para jogos de mata-mata, os canais serão exibidos assim que os confrontos forem definidos.
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseBroadcasters} sx={{ fontWeight: 'bold' }}>
+            Fechar
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

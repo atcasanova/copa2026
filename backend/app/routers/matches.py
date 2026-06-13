@@ -92,6 +92,14 @@ def get_matches(
 ):
     return list_matches(date, stage, group_name, team, ground, status, missing_score, limit, db, current_user)
 
+@router.get("/broadcasts")
+def get_broadcasts(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    from ..broadcasters import get_match_broadcasters
+    return get_match_broadcasters(db)
+
 @router.get("/{match_id}", response_model=MatchResponse)
 def get_match_detail(
     match_id: int,

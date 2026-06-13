@@ -380,8 +380,64 @@ export default function Rankings() {
         </Card>
       )}
 
+      {/* Standings Table */}
+      <TableContainer component={Paper} sx={{ borderRadius: 3, overflowX: 'auto' }}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
+              <TableCell>Participante</TableCell>
+              <TableCell align="center">Pts Totais</TableCell>
+              <TableCell align="center">
+                <Box display="inline-flex" alignItems="center" gap={0.5}>
+                  Placar Exato (10)
+                  <Tooltip title="Número de palpites com placar 100% correto (10 pontos)">
+                    <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
+                  </Tooltip>
+                </Box>
+              </TableCell>
+              <TableCell align="center">
+                <Box display="inline-flex" alignItems="center" gap={0.5}>
+                  Resultado Certo (3/4/6)
+                  <Tooltip title="Número de palpites com vencedor ou empate correto (3, 4 ou 6 pontos)">
+                    <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
+                  </Tooltip>
+                </Box>
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
+              // Loading skeletons
+              Array.from(new Array(5)).map((_, idx) => (
+                <TableRow key={idx}>
+                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
+                  <TableCell>
+                    <Box display="flex" alignItems="center" gap={2}>
+                      <Skeleton variant="circular" width={32} height={32} />
+                      <Skeleton variant="text" width={120} />
+                    </Box>
+                  </TableCell>
+                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
+                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
+                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
+                </TableRow>
+              ))
+            ) : rankingData.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                  Nenhum usuário classificado para esta visualização.
+                </TableCell>
+              </TableRow>
+            ) : (
+              renderRankingRows(rankingData)
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
       {tabIndex === 0 && (
-        <Card sx={{ mb: 3 }}>
+        <Card sx={{ mt: 3, mb: 3 }}>
           <CardContent sx={{ p: { xs: 2, md: 3 } }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 2 }}>
               <Box>
@@ -535,62 +591,6 @@ export default function Rankings() {
           </CardContent>
         </Card>
       )}
-
-      {/* Standings Table */}
-      <TableContainer component={Paper} sx={{ borderRadius: 3, overflowX: 'auto' }}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
-              <TableCell>Participante</TableCell>
-              <TableCell align="center">Pts Totais</TableCell>
-              <TableCell align="center">
-                <Box display="inline-flex" alignItems="center" gap={0.5}>
-                  Placar Exato (10)
-                  <Tooltip title="Número de palpites com placar 100% correto (10 pontos)">
-                    <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
-                  </Tooltip>
-                </Box>
-              </TableCell>
-              <TableCell align="center">
-                <Box display="inline-flex" alignItems="center" gap={0.5}>
-                  Resultado Certo (3/4/6)
-                  <Tooltip title="Número de palpites com vencedor ou empate correto (3, 4 ou 6 pontos)">
-                    <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
-                  </Tooltip>
-                </Box>
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
-              // Loading skeletons
-              Array.from(new Array(5)).map((_, idx) => (
-                <TableRow key={idx}>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={2}>
-                      <Skeleton variant="circular" width={32} height={32} />
-                      <Skeleton variant="text" width={120} />
-                    </Box>
-                  </TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                </TableRow>
-              ))
-            ) : rankingData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                  Nenhum usuário classificado para esta visualização.
-                </TableCell>
-              </TableRow>
-            ) : (
-              renderRankingRows(rankingData)
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
 
       <Box
         sx={{

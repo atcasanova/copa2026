@@ -63,27 +63,83 @@ def get_ranking_history(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    rows = db.query(RankingSnapshot).order_by(
-        RankingSnapshot.snapshot_date.asc(),
-        RankingSnapshot.position.asc(),
-        RankingSnapshot.display_name.asc()
-    ).all()
+    rows = db.query(RankingSnapshot).all()
 
     current_ranking = get_rankings(db)
     today = datetime.now(LOCAL_TIMEZONE).date()
-    has_today_snapshot = any(row.snapshot_date == today for row in rows)
+
+    class HistoryRow:
+        def __init__(self, snapshot_date, user_id, display_name, avatar_url, position, total_points, exact_scores_count, correct_results_count):
+            self.snapshot_date = snapshot_date
+            self.user_id = user_id
+            self.display_name = display_name
+            self.avatar_url = avatar_url
+            self.position = position
+            self.total_points = total_points
+            self.exact_scores_count = exact_scores_count
+            self.correct_results_count = correct_results_count
+
+    history_rows = [
+        HistoryRow(
+            row.snapshot_date,
+            row.user_id,
+            row.display_name,
+            row.avatar_url,
+            row.position,
+            row.total_points,
+            row.exact_scores_count,
+            row.correct_results_count
+        ) for row in rows
+    ]
+
+    has_today_snapshot = any(row.snapshot_date == today for row in history_rows)
     if not has_today_snapshot:
         for row in current_ranking:
-            rows.append(type("CurrentSnapshot", (), {
-                "snapshot_date": today,
-                "user_id": row["user_id"],
-                "display_name": row["display_name"],
-                "avatar_url": row["avatar_url"],
-                "position": row["position"],
-                "total_points": row["total_points"],
-                "exact_scores_count": row["exact_scores_count"],
-                "correct_results_count": row["correct_results_count"],
-            })())
+            history_rows.append(HistoryRow(
+                today,
+                row["user_id"],
+                row["display_name"],
+                row["avatar_url"],
+                row["position"],
+                row["total_points"],
+                row["exact_scores_count"],
+                row["correct_results_count"]
+            ))
+
+    # Load all user registration dates for tie-breaker sorting
+    from ..models import User
+    user_reg_dates = {user.id: user.created_at for user in db.query(User).all()}
+
+    # Group by date
+    by_date = {}
+    for row in history_rows:
+        by_date.setdefault(row.snapshot_date, []).append(row)
+
+    # Re-sort each date group using tie-breaker rules and assign sequential positions
+    final_rows = []
+    for date, date_rows in sorted(by_date.items()):
+        def sort_key(r):
+            uid = r.user_id
+            if isinstance(uid, str):
+                from uuid import UUID
+                try:
+                    uid = UUID(uid)
+                except ValueError:
+                    pass
+            reg_date = user_reg_dates.get(uid) or datetime.min
+            return (
+                -r.total_points,
+                -r.exact_scores_count,
+                -r.correct_results_count,
+                reg_date.timestamp(),
+                r.display_name.lower()
+            )
+        date_rows.sort(key=sort_key)
+        for idx, r in enumerate(date_rows):
+            r.position = idx + 1
+        final_rows.extend(date_rows)
+
+    rows = final_rows
 
     dates = sorted({row.snapshot_date for row in rows})
     current_top_ids = {str(row["user_id"]) for row in current_ranking[:5]}
