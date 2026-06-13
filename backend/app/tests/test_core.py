@@ -938,7 +938,7 @@ def test_lucido_ranking_flow(client, db_session, test_users):
     db_session.add(match)
     db_session.commit()
 
-    # 2. Ana predicts 2x0 (Saudi Arabia wins 2-1 in reality, so Ana got the score/result wrong). Points earned: 0.
+    # Ana predicts 2x0 (actual score 1x2). Points: 0. Difference: abs(2-1) + abs(0-2) = 1 + 2 = 3.
     pred_ana = Prediction(
         match_id=match.id,
         user_id=ana.id,
@@ -947,14 +947,14 @@ def test_lucido_ranking_flow(client, db_session, test_users):
         points_earned=0,
         base_points=0
     )
-    # Bruno predicts 1x2 (exact match). Points earned: 10.
+    # Bruno predicts 5x0 (actual score 1x2). Points: 0. Difference: abs(5-1) + abs(0-2) = 4 + 2 = 6.
     pred_bruno = Prediction(
         match_id=match.id,
         user_id=bruno.id,
-        goals_team1=1,
-        goals_team2=2,
-        points_earned=10,
-        base_points=10
+        goals_team1=5,
+        goals_team2=0,
+        points_earned=0,
+        base_points=0
     )
     db_session.add_all([pred_ana, pred_bruno])
     db_session.commit()
@@ -963,13 +963,15 @@ def test_lucido_ranking_flow(client, db_session, test_users):
     from app.scoring import get_lucido_ranking
     rank = get_lucido_ranking(db_session)
 
-    # Ana must be first, Bruno second.
+    # Bruno must be first (position 1) due to tie-breaker (higher goal difference 6 vs 3), Ana second (position 2)
     ana_rank = next(r for r in rank if r["user_id"] == ana.id)
     bruno_rank = next(r for r in rank if r["user_id"] == bruno.id)
 
     assert ana_rank["zero_points_count"] == 1
-    assert bruno_rank["zero_points_count"] == 0
-    assert ana_rank["position"] < bruno_rank["position"]
+    assert bruno_rank["zero_points_count"] == 1
+    assert ana_rank["total_goal_difference"] == 3
+    assert bruno_rank["total_goal_difference"] == 6
+    assert bruno_rank["position"] < ana_rank["position"]
 
     # 4. Check cache functionality
     from app.models import RankingCache
@@ -985,9 +987,10 @@ def test_lucido_ranking_flow(client, db_session, test_users):
     assert res.status_code == 200
     res_data = res.json()
     assert len(res_data) > 0
-    # The first one in the response should be Ana
-    assert res_data[0]["user_id"] == str(ana.id)
+    # The first one in the response should be Bruno due to the tie-breaker
+    assert res_data[0]["user_id"] == str(bruno.id)
     assert res_data[0]["zero_points_count"] == 1
+    assert res_data[0]["total_goal_difference"] == 6
 
     # 5. Check cache invalidation
     invalidate_ranking_cache(db_session)

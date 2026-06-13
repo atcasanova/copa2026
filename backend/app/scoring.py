@@ -543,24 +543,36 @@ def get_lucido_ranking(db: Session, group_id: str = None) -> list[dict]:
 
     for user in users:
         zero_points_count = 0
+        total_goal_difference = 0
         if ranked_match_ids:
-            zero_points_count = db.query(Prediction).filter(
+            zero_preds = db.query(Prediction, Match).join(
+                Match, Prediction.match_id == Match.id
+            ).filter(
                 Prediction.user_id == user.id,
                 Prediction.match_id.in_(ranked_match_ids),
                 Prediction.points_earned == 0
-            ).count()
+            ).all()
+            
+            zero_points_count = len(zero_preds)
+            total_goal_difference = sum(
+                abs((pred.goals_team1 or 0) - (match.score_ft_team1 or 0)) +
+                abs((pred.goals_team2 or 0) - (match.score_ft_team2 or 0))
+                for pred, match in zero_preds
+            )
 
         ranking_list.append({
             "user_id": user.id,
             "display_name": user.display_name,
             "avatar_url": user.avatar_url,
             "zero_points_count": zero_points_count,
+            "total_goal_difference": total_goal_difference,
             "registration_date": user.created_at
         })
 
     def sort_key(row):
         return (
             -row["zero_points_count"],
+            -row["total_goal_difference"],
             row["registration_date"].timestamp(),
             row["display_name"].lower()
         )
@@ -580,6 +592,7 @@ def get_lucido_ranking(db: Session, group_id: str = None) -> list[dict]:
                 "display_name": r["display_name"],
                 "avatar_url": r["avatar_url"],
                 "zero_points_count": r["zero_points_count"],
+                "total_goal_difference": r["total_goal_difference"],
                 "position": r["position"]
             })
         cache_entry = db.query(RankingCache).filter(RankingCache.key == cache_key).first()

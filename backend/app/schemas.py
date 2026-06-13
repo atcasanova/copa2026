@@ -256,6 +256,7 @@ class LucidoRankingRowResponse(BaseModel):
     display_name: str
     avatar_url: Optional[str] = None
     zero_points_count: int
+    total_goal_difference: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

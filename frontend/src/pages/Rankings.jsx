@@ -331,6 +331,10 @@ export default function Rankings() {
           <TableCell align="center" sx={{ fontWeight: 800, color: 'warning.light', fontSize: '1.05rem' }}>
             {row.zero_points_count}
           </TableCell>
+
+          <TableCell align="center" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+            {row.total_goal_difference}
+          </TableCell>
         </TableRow>
       )
     })
@@ -539,6 +543,14 @@ export default function Rankings() {
                 <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
                 <TableCell>Participante</TableCell>
                 <TableCell align="center">Palpites com 0 Pts</TableCell>
+                <TableCell align="center">
+                  <Box display="inline-flex" alignItems="center" gap={0.5}>
+                    Diferença de Gols
+                    <Tooltip title="Soma das diferenças absolutas de gols nos palpites com 0 pontos. Usado como critério de desempate (maior valor vence).">
+                      <HelpOutline sx={{ fontSize: '0.9rem', cursor: 'help', color: 'text.secondary' }} />
+                    </Tooltip>
+                  </Box>
+                </TableCell>
               </TableRow>
             )}
           </TableHead>
@@ -555,13 +567,13 @@ export default function Rankings() {
                     </Box>
                   </TableCell>
                   <TableCell align="center"><Skeleton variant="text" /></TableCell>
-                  {rankingType === 'normal' && <TableCell align="center"><Skeleton variant="text" /></TableCell>}
+                  <TableCell align="center"><Skeleton variant="text" /></TableCell>
                   {rankingType === 'normal' && <TableCell align="center"><Skeleton variant="text" /></TableCell>}
                 </TableRow>
               ))
             ) : rankingData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={rankingType === 'normal' ? 5 : 3} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={rankingType === 'normal' ? 5 : 4} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   Nenhum usuário classificado para esta visualização.
                 </TableCell>
               </TableRow>
@@ -779,6 +791,7 @@ export default function Rankings() {
                     <TableCell align="center" sx={{ width: '8%' }}>Pos</TableCell>
                     <TableCell>Participante</TableCell>
                     <TableCell align="center">Palpites com 0 Pts</TableCell>
+                    <TableCell align="center">Diferença de Gols</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
