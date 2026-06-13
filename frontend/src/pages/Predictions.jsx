@@ -318,7 +318,13 @@ export default function Predictions() {
     // Trigger auto-save if both fields are filled (not empty)
     if (updatedPred.goals_team1 !== undefined && updatedPred.goals_team2 !== undefined &&
         updatedPred.goals_team1 !== '' && updatedPred.goals_team2 !== '') {
-      triggerSavePrediction(matchId, updatedPred.goals_team1, updatedPred.goals_team2, updatedPred.qualified_team_name)
+      const g1 = parseInt(updatedPred.goals_team1);
+      const g2 = parseInt(updatedPred.goals_team2);
+      if ((!isNaN(g1) && g1 >= 6) || (!isNaN(g2) && g2 >= 6)) {
+        setSaveStates(prev => ({ ...prev, [matchId]: 'unsaved' }));
+      } else {
+        handleAutoSave(matchId, updatedPred.goals_team1, updatedPred.goals_team2, updatedPred.qualified_team_name);
+      }
     }
   }
 
