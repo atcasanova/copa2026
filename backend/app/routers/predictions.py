@@ -406,20 +406,13 @@ def get_match_prediction_visibility(
         Prediction.match_id == match_id,
         *_approved_participant_filters()
     ).all()
-    predictions.sort(
-        key=lambda pred: (
-            -(pred.points_earned if is_scored and pred.points_earned is not None else -1),
-            pred.user.display_name.lower()
-        )
-    )
 
-    points_counter = Counter()
+    # If is_scored and points are not calculated in DB yet (e.g. live game or pending scoring),
+    # calculate the preview in-memory on the fly.
+    stage_multipliers = None
     if is_scored:
-        points_counter.update(pred.points_earned or 0 for pred in predictions)
-    points_summary = [
-        {"points": points, "count": count}
-        for points, count in sorted(points_counter.items(), key=lambda item: item[0], reverse=True)
-    ]
+        from app.scoring import load_stage_multipliers, score_prediction
+        stage_multipliers = load_stage_multipliers(db)
 
     entries = []
     for pred in predictions:
@@ -437,9 +430,46 @@ def get_match_prediction_visibility(
             entry["goals_team1"] = pred.goals_team1
             entry["goals_team2"] = pred.goals_team2
             entry["qualified_team_name"] = pred.qualified_team_name
+        
         if is_scored:
-            entry["points_earned"] = pred.points_earned or 0
+            if pred.points_earned is not None:
+                entry["points_earned"] = pred.points_earned
+            else:
+                # Calculate in-memory preview
+                temp_pred = Prediction(
+                    match_id=pred.match_id,
+                    user_id=pred.user_id,
+                    goals_team1=pred.goals_team1,
+                    goals_team2=pred.goals_team2,
+                    qualified_team_name=pred.qualified_team_name
+                )
+                score_prediction(db, temp_pred, match, stage_multipliers)
+                entry["points_earned"] = temp_pred.points_earned or 0
         entries.append(entry)
+
+    # Sort entries by points (descending) then display name (alphabetical) if scored/live preview,
+    # otherwise just sort by display name
+    if is_scored:
+        entries.sort(
+            key=lambda ent: (
+                -(ent["points_earned"] or 0),
+                ent["display_name"].lower()
+            )
+        )
+    else:
+        entries.sort(
+            key=lambda ent: ent["display_name"].lower()
+        )
+
+    points_counter = Counter()
+    if is_scored:
+        for entry in entries:
+            points_counter[entry["points_earned"] or 0] += 1
+            
+    points_summary = [
+        {"points": points, "count": count}
+        for points, count in sorted(points_counter.items(), key=lambda item: item[0], reverse=True)
+    ]
 
     return {
         "match_id": match.id,

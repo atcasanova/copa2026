@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Button } from '@mui/material'
+import { Button, IconButton, CircularProgress } from '@mui/material'
 import {
   Download as DownloadIcon,
   Share as ShareIcon
@@ -151,8 +151,19 @@ async function renderElementToPngBlob(element) {
   const rect = element.getBoundingClientRect()
   const width = Math.ceil(rect.width)
   const height = Math.ceil(rect.height)
-  const clone = element.cloneNode(true)
+  let clone = element.cloneNode(true)
   copyComputedStyles(element, clone)
+
+  if (element.tagName === 'TR') {
+    const table = document.createElement('table')
+    table.style.width = '100%'
+    table.style.borderCollapse = 'collapse'
+    table.style.backgroundColor = '#0b0f19'
+    const tbody = document.createElement('tbody')
+    tbody.appendChild(clone)
+    table.appendChild(tbody)
+    clone = table
+  }
 
   clone.style.width = `${width}px`
   clone.style.height = `${height}px`
@@ -208,6 +219,7 @@ export default function ExportElementImageButton({
   variant = 'outlined',
   color = 'primary',
   fullWidth = false,
+  iconOnly = false,
 }) {
   const [exporting, setExporting] = useState(false)
   const canShareFiles = Boolean(navigator.canShare && navigator.share)
@@ -239,6 +251,26 @@ export default function ExportElementImageButton({
     } finally {
       setExporting(false)
     }
+  }
+
+  if (iconOnly) {
+    return (
+      <IconButton
+        size={size}
+        color={color}
+        onClick={handleExport}
+        disabled={exporting}
+        aria-label={label}
+      >
+        {exporting ? (
+          <CircularProgress size={20} color="inherit" />
+        ) : canShareFiles ? (
+          <ShareIcon fontSize="small" />
+        ) : (
+          <DownloadIcon fontSize="small" />
+        )}
+      </IconButton>
+    )
   }
 
   return (

@@ -86,6 +86,7 @@ const getWeightedLuckyScore = () => {
 export default function Predictions() {
   const { user } = useAuth()
   const groupComparisonRef = useRef(null)
+  const matchRefs = useRef({})
   
   // Data lists
   const [matches, setMatches] = useState([])
@@ -496,6 +497,29 @@ export default function Predictions() {
         >
           <TvIcon fontSize="small" />
         </IconButton>
+      </Tooltip>
+    )
+  }
+
+  const renderShareButton = (match) => {
+    const ref = {
+      get current() {
+        return matchRefs.current[match.id]
+      }
+    }
+    return (
+      <Tooltip title="Compartilhar imagem deste jogo">
+        <Box display="inline-block">
+          <ExportElementImageButton
+            targetRef={ref}
+            fileName={`jogo_${match.team1_name.replace(/\s+/g, '_')}_vs_${match.team2_name.replace(/\s+/g, '_')}.png`}
+            shareTitle={`${match.team1_name} x ${match.team2_name}`}
+            label="Compartilhar"
+            iconOnly
+            size="small"
+            color="primary"
+          />
+        </Box>
       </Tooltip>
     )
   }
@@ -917,6 +941,7 @@ export default function Predictions() {
                   return (
                     <TableRow 
                       key={match.id}
+                      ref={el => { if (el) matchRefs.current[match.id] = el; }}
                       sx={{
                         bgcolor: soon && !locked ? 'rgba(245, 158, 11, 0.02)' : isFinished ? 'rgba(255, 255, 255, 0.005)' : 'transparent',
                         '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.01)' }
@@ -933,6 +958,7 @@ export default function Predictions() {
                         <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, alignItems: 'center' }}>
                           {renderPredictionListButton(match, locked)}
                           {renderBroadcastersButton(match)}
+                          {renderShareButton(match)}
                         </Box>
                       </TableCell>
 
@@ -1193,6 +1219,7 @@ export default function Predictions() {
               return (
                 <Card 
                   key={match.id} 
+                  ref={el => { if (el) matchRefs.current[match.id] = el; }}
                   sx={{ 
                     borderRadius: 3, 
                     border: '1px solid',
@@ -1215,6 +1242,7 @@ export default function Predictions() {
                       <Stack direction="row" spacing={0.5} alignItems="center">
                         {renderPredictionListButton(match, locked)}
                         {renderBroadcastersButton(match)}
+                        {renderShareButton(match)}
                         {soon && !locked && (
                           <Chip label="Bloqueia logo" color="warning" size="small" sx={{ fontSize: '0.65rem', height: 18 }} />
                         )}
